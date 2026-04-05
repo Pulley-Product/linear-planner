@@ -89,10 +89,14 @@ export function computePlan({
     const pool = eligible(issue)
     if (!pool.length) return null // no eligible members — error case
     const pts = issue.estimate || 1
+    // Pick the member who finishes soonest; break ties by least total work assigned
+    const totalWork = (m) => Object.values(m.cp).reduce((a, b) => a + b, 0)
     return pool.reduce((best, m) => {
       const lastBest = simulateLastCycle(best, pts, minCI)
       const lastM = simulateLastCycle(m, pts, minCI)
-      return lastM < lastBest ? m : best
+      if (lastM < lastBest) return m
+      if (lastM === lastBest && totalWork(m) < totalWork(best)) return m
+      return best
     }, pool[0])
   }
 
