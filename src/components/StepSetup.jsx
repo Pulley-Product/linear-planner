@@ -655,6 +655,12 @@ export function StepProjOrder({ projects, issues, chosenInits, projOrder, setPro
 
 // ── Label & Estimate Step ────────────────────────────────────────────────
 export function StepLabelEstimate({ issues, chosenInits, projOrder, projects, orderMap, initId, issueLabels, setIssueLabel, availableLabels, setEst, members, getAssign, setAssign, err, onNext, onBack }) {
+  const unlabelledCount = issues.filter(i => {
+    const hasLabel = (i.labels?.nodes || []).length > 0 || !!issueLabels[i.id]
+    const av = getAssign(i.id)
+    const hasAssignment = (!!av && av !== '__auto__') || (!av && !!i.assignee?.id)
+    return !hasLabel && !hasAssignment
+  }).length
   const unestCount = issues.filter(i => !i.estimate || i.estimate <= 0).length
 
   const projInitName = {}
@@ -669,19 +675,21 @@ export function StepLabelEstimate({ issues, chosenInits, projOrder, projects, or
   return (
     <div>
       <H1>Label & <R>Estimate</R></H1>
-      <Sub>Set story point estimates for every issue. Labels are optional and help with auto-assignment via the label mapping step.</Sub>
+      <Sub>Set a label and story point estimate for every issue. Labels are not required if a member is directly assigned.</Sub>
       <div style={{
         display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 14px', marginBottom: 14,
         background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8,
         fontSize: 11, color: '#92400e', lineHeight: 1.6,
       }}>
         <span style={{ flexShrink: 0, fontSize: 14 }}>&#9432;</span>
-        <span>Changes to labels, estimates, and member assignments on this screen are <strong>for this planning session only</strong> and will not be saved. To make permanent changes, update them directly in Linear.</span>
+        <span>Every issue needs an <strong>estimate</strong> and either a <strong>label</strong> or an <strong>assigned member</strong>. If both are set, the member takes priority. Changes on this screen are <strong>for this planning session only</strong> — update them directly in Linear to make permanent changes.</span>
       </div>
 
-      {unestCount > 0 && (
+      {(unlabelledCount > 0 || unestCount > 0) && (
         <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#e63946', marginBottom: 12 }}>
-          <span>{unestCount} need estimates</span>
+          {unlabelledCount > 0 && <span>{unlabelledCount} need labels</span>}
+          {unlabelledCount > 0 && unestCount > 0 && <span> · </span>}
+          {unestCount > 0 && <span>{unestCount} need estimates</span>}
         </div>
       )}
       {err && <Err>{err}</Err>}
@@ -713,7 +721,9 @@ export function StepLabelEstimate({ issues, chosenInits, projOrder, projects, or
               const linearLabel = (issue.labels?.nodes || [])[0]?.name || ''
               const hasLabel = !!(issueLabels[issue.id] || linearLabel)
               const hasEst = issue.estimate != null && issue.estimate > 0
-              const needsAttention = !hasEst
+              const assignVal = getAssign(issue.id)
+              const hasAssignment = (!!assignVal && assignVal !== '__auto__') || (!assignVal && !!issue.assignee?.id)
+              const needsAttention = (!hasLabel && !hasAssignment) || !hasEst
               return (
                 <LabelEstimateRow key={issue.id} issue={issue}
                   issueLabels={issueLabels} setIssueLabel={setIssueLabel} availableLabels={availableLabels}
@@ -736,7 +746,6 @@ export function StepLabelEstimate({ issues, chosenInits, projOrder, projects, or
 }
 
 function LabelEstimateRow({ issue, issueLabels, setIssueLabel, availableLabels, setEst, hasLabel, hasEst, needsAttention, linearLabel, members, getAssign, setAssign }) {
-  // Labels are always optional - they help with auto-assignment but are not required
   const [editingEst, setEditingEst] = useState(false)
   const [estVal, setEstVal] = useState('')
 
@@ -760,19 +769,25 @@ function LabelEstimateRow({ issue, issueLabels, setIssueLabel, availableLabels, 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{issue.title}</div>
       </div>
-      {/* Label dropdown (optional) */}
+      {/* Label dropdown */}
+      {(() => {
+        const hasAssign = !!getAssign(issue.id) || !!issue.assignee?.id
+        const labelOptional = !hasLabel && hasAssign
+        return (
       <select value={issueLabels[issue.id] || ''} onChange={e => setIssueLabel(issue.id, e.target.value)}
         style={{ ...inpS, width: 130, padding: '4px 8px', fontSize: 11,
-          background: hasLabel ? 'rgba(45,106,79,0.08)' : '#f0efe9',
-          borderColor: hasLabel ? 'rgba(45,106,79,0.3)' : '#dddcd5',
-          color: hasLabel ? '#2d6a4f' : '#9a9a9e',
+          background: hasLabel ? 'rgba(45,106,79,0.08)' : labelOptional ? '#f0efe9' : 'white',
+          borderColor: hasLabel ? 'rgba(45,106,79,0.3)' : labelOptional ? '#dddcd5' : '#fecaca',
+          color: hasLabel ? '#2d6a4f' : labelOptional ? '#9a9a9e' : '#e63946',
         }}>
         {linearLabel && !issueLabels[issue.id]
           ? <option value=''>{linearLabel}</option>
-          : <option value=''>{linearLabel ? linearLabel + ' (original)' : 'No label'}</option>
+          : <option value=''>{linearLabel ? linearLabel + ' (original)' : labelOptional ? 'Optional' : 'Pick label…'}</option>
         }
         {availableLabels.filter(l => l !== linearLabel).map(l => <option key={l} value={l}>{l}</option>)}
       </select>
+        )
+      })()}
       {/* Assignment dropdown */}
       <select value={getAssign(issue.id) || (issue.assignee?.id || '')} onChange={e => setAssign(issue.id, e.target.value === '__auto__' ? '__auto__' : e.target.value)}
         style={{ ...inpS, width: 120, padding: '4px 8px', fontSize: 11,
