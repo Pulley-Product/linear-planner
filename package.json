@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "proxy": "node proxy.js",
-    "start": "node proxy.js & vite"
+    "start": "node proxy.js & vite",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "react": "^18.2.0",
@@ -17,6 +19,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.0",
-    "vite": "^5.0.0"
+    "vite": "^5.0.0",
+    "vitest": "^4.1.2"
   }
 }
