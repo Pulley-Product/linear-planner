@@ -118,28 +118,75 @@ export function StepCycle({ cycles, selCycleId, setSelCycleId, err, onNext, onBa
 // ── Step 3: Pick Initiatives ──────────────────────────────────────────────
 export function StepInitiatives({ allInits, selInits, setSelInits, onNext, onBack }) {
   const [search, setSearch] = useState('')
+  const [activeTab, setActiveTab] = useState('active')
   const toggle = id => {
     const ns = new Set(selInits)
     ns.has(id) ? ns.delete(id) : ns.add(id)
     setSelInits(ns)
   }
-  const INIT_STATUS_ORDER = { active: 0, planned: 1, completed: 2 }
-  const filtered = allInits
+
+  // Group initiatives by status
+  const statusGroups = {}
+  allInits.forEach(it => {
+    const s = (it.status || 'unknown').toLowerCase()
+    if (!statusGroups[s]) statusGroups[s] = []
+    statusGroups[s].push(it)
+  })
+  // Sort each group alphabetically
+  Object.values(statusGroups).forEach(group => group.sort((a, b) => a.name.localeCompare(b.name)))
+
+  const STATUS_TAB_ORDER = ['active', 'planned', 'started', 'backlog', 'completed', 'paused', 'canceled']
+  const tabs = STATUS_TAB_ORDER.filter(s => statusGroups[s]?.length > 0)
+  // Add any remaining statuses not in the predefined order
+  Object.keys(statusGroups).forEach(s => { if (!tabs.includes(s)) tabs.push(s) })
+
+  // If activeTab doesn't exist in tabs, default to first tab
+  const currentTab = tabs.includes(activeTab) ? activeTab : tabs[0] || 'active'
+  const tabInits = (statusGroups[currentTab] || [])
     .filter(it => it.name.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => {
-      const sa = INIT_STATUS_ORDER[(a.status || '').toLowerCase()] ?? 99
-      const sb = INIT_STATUS_ORDER[(b.status || '').toLowerCase()] ?? 99
-      if (sa !== sb) return sa - sb
-      return a.name.localeCompare(b.name)
-    })
+
+  const TAB_COLORS = {
+    active:  { bg: '#dcfce7', color: '#166534', activeBg: '#166534', activeColor: 'white' },
+    planned: { bg: '#dbeafe', color: '#1d4ed8', activeBg: '#1d4ed8', activeColor: 'white' },
+    started: { bg: '#dcfce7', color: '#166534', activeBg: '#166534', activeColor: 'white' },
+    backlog: { bg: '#f0efe9', color: '#9a9a9e', activeBg: '#5a5a72', activeColor: 'white' },
+    completed: { bg: '#e8e7e3', color: '#5a5a72', activeBg: '#5a5a72', activeColor: 'white' },
+    paused:  { bg: '#fef9c3', color: '#854d0e', activeBg: '#854d0e', activeColor: 'white' },
+    canceled: { bg: '#fee2e2', color: '#991b1b', activeBg: '#991b1b', activeColor: 'white' },
+  }
+  const defaultTabColor = { bg: '#f0efe9', color: '#9a9a9e', activeBg: '#5a5a72', activeColor: 'white' }
+
   return (
     <div>
       <H1>Select <R>Initiatives</R></H1>
       <Sub>Pick which initiatives to include. This determines which projects are available in the next step.</Sub>
       <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search initiatives..."
         style={{ ...inpS, marginBottom: 12, width: '100%' }} />
+
+      {/* Status tabs */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap' }}>
+        {tabs.map(tab => {
+          const isActive = tab === currentTab
+          const tc = TAB_COLORS[tab] || defaultTabColor
+          const selectedInTab = (statusGroups[tab] || []).filter(it => selInits.has(it.id)).length
+          const totalInTab = (statusGroups[tab] || []).length
+          return (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              style={{
+                padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                fontSize: 11, fontFamily: 'monospace', fontWeight: isActive ? 700 : 500,
+                background: isActive ? tc.activeBg : tc.bg,
+                color: isActive ? tc.activeColor : tc.color,
+                transition: 'all 0.15s ease',
+              }}>
+              {tab} ({selectedInTab}/{totalInTab})
+            </button>
+          )
+        })}
+      </div>
+
       <Card>
-        {filtered.map(it => {
+        {tabInits.map(it => {
           const sel = selInits.has(it.id)
           return (
             <div key={it.id} onClick={() => toggle(it.id)} style={pickRowStyle(sel)}>
@@ -150,11 +197,26 @@ export function StepInitiatives({ allInits, selInits, setSelInits, onNext, onBac
                   {it.projects?.nodes?.length || 0} projects
                 </div>
               </div>
-              <StateBadge state={it.status} />
             </div>
           )
         })}
+        {tabInits.length === 0 && (
+          <div style={{ padding: '16px 0', textAlign: 'center', fontSize: 12, color: '#9a9a9e' }}>
+            No initiatives match your search.
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+          <GBtn onClick={() => {
+            const tabIds = (statusGroups[currentTab] || []).map(i => i.id)
+            const ns = new Set(selInits)
+            tabIds.forEach(id => ns.add(id))
+            setSelInits(ns)
+          }}>Select All in Tab</GBtn>
+          <GBtn onClick={() => {
+            const tabIds = new Set((statusGroups[currentTab] || []).map(i => i.id))
+            const ns = new Set([...selInits].filter(id => !tabIds.has(id)))
+            setSelInits(ns)
+          }}>Deselect All in Tab</GBtn>
           <GBtn onClick={() => setSelInits(new Set(allInits.map(i => i.id)))}>All</GBtn>
           <GBtn onClick={() => setSelInits(new Set())}>None</GBtn>
         </div>
@@ -593,12 +655,6 @@ export function StepProjOrder({ projects, issues, chosenInits, projOrder, setPro
 
 // ── Label & Estimate Step ────────────────────────────────────────────────
 export function StepLabelEstimate({ issues, chosenInits, projOrder, projects, orderMap, initId, issueLabels, setIssueLabel, availableLabels, setEst, members, getAssign, setAssign, err, onNext, onBack }) {
-  const unlabelledCount = issues.filter(i => {
-    const hasLabel = (i.labels?.nodes || []).length > 0 || !!issueLabels[i.id]
-    const av = getAssign(i.id)
-    const hasAssignment = (!!av && av !== '__auto__') || (!av && !!i.assignee?.id)
-    return !hasLabel && !hasAssignment
-  }).length
   const unestCount = issues.filter(i => !i.estimate || i.estimate <= 0).length
 
   const projInitName = {}
@@ -613,7 +669,7 @@ export function StepLabelEstimate({ issues, chosenInits, projOrder, projects, or
   return (
     <div>
       <H1>Label & <R>Estimate</R></H1>
-      <Sub>Set a label and story point estimate for every issue. Labels are not required if a member is directly assigned.</Sub>
+      <Sub>Set story point estimates for every issue. Labels are optional and help with auto-assignment via the label mapping step.</Sub>
       <div style={{
         display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 14px', marginBottom: 14,
         background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8,
@@ -623,11 +679,9 @@ export function StepLabelEstimate({ issues, chosenInits, projOrder, projects, or
         <span>Changes to labels, estimates, and member assignments on this screen are <strong>for this planning session only</strong> and will not be saved. To make permanent changes, update them directly in Linear.</span>
       </div>
 
-      {(unlabelledCount > 0 || unestCount > 0) && (
+      {unestCount > 0 && (
         <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#e63946', marginBottom: 12 }}>
-          {unlabelledCount > 0 && <span>{unlabelledCount} need labels</span>}
-          {unlabelledCount > 0 && unestCount > 0 && <span> · </span>}
-          {unestCount > 0 && <span>{unestCount} need estimates</span>}
+          <span>{unestCount} need estimates</span>
         </div>
       )}
       {err && <Err>{err}</Err>}
@@ -659,9 +713,7 @@ export function StepLabelEstimate({ issues, chosenInits, projOrder, projects, or
               const linearLabel = (issue.labels?.nodes || [])[0]?.name || ''
               const hasLabel = !!(issueLabels[issue.id] || linearLabel)
               const hasEst = issue.estimate != null && issue.estimate > 0
-              const assignVal = getAssign(issue.id)
-              const hasAssignment = (!!assignVal && assignVal !== '__auto__') || (!assignVal && !!issue.assignee?.id)
-              const needsAttention = (!hasLabel && !hasAssignment) || !hasEst
+              const needsAttention = !hasEst
               return (
                 <LabelEstimateRow key={issue.id} issue={issue}
                   issueLabels={issueLabels} setIssueLabel={setIssueLabel} availableLabels={availableLabels}
@@ -684,6 +736,7 @@ export function StepLabelEstimate({ issues, chosenInits, projOrder, projects, or
 }
 
 function LabelEstimateRow({ issue, issueLabels, setIssueLabel, availableLabels, setEst, hasLabel, hasEst, needsAttention, linearLabel, members, getAssign, setAssign }) {
+  // Labels are always optional - they help with auto-assignment but are not required
   const [editingEst, setEditingEst] = useState(false)
   const [estVal, setEstVal] = useState('')
 
@@ -707,25 +760,19 @@ function LabelEstimateRow({ issue, issueLabels, setIssueLabel, availableLabels, 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{issue.title}</div>
       </div>
-      {/* Label dropdown */}
-      {(() => {
-        const hasAssign = !!getAssign(issue.id) || !!issue.assignee?.id
-        const labelOptional = !hasLabel && hasAssign
-        return (
+      {/* Label dropdown (optional) */}
       <select value={issueLabels[issue.id] || ''} onChange={e => setIssueLabel(issue.id, e.target.value)}
         style={{ ...inpS, width: 130, padding: '4px 8px', fontSize: 11,
-          background: hasLabel ? 'rgba(45,106,79,0.08)' : labelOptional ? '#f0efe9' : 'white',
-          borderColor: hasLabel ? 'rgba(45,106,79,0.3)' : labelOptional ? '#dddcd5' : '#fecaca',
-          color: hasLabel ? '#2d6a4f' : labelOptional ? '#9a9a9e' : '#e63946',
+          background: hasLabel ? 'rgba(45,106,79,0.08)' : '#f0efe9',
+          borderColor: hasLabel ? 'rgba(45,106,79,0.3)' : '#dddcd5',
+          color: hasLabel ? '#2d6a4f' : '#9a9a9e',
         }}>
         {linearLabel && !issueLabels[issue.id]
           ? <option value=''>{linearLabel}</option>
-          : <option value=''>{linearLabel ? linearLabel + ' (original)' : labelOptional ? 'Optional' : 'Pick label…'}</option>
+          : <option value=''>{linearLabel ? linearLabel + ' (original)' : 'No label'}</option>
         }
         {availableLabels.filter(l => l !== linearLabel).map(l => <option key={l} value={l}>{l}</option>)}
       </select>
-        )
-      })()}
       {/* Assignment dropdown */}
       <select value={getAssign(issue.id) || (issue.assignee?.id || '')} onChange={e => setAssign(issue.id, e.target.value === '__auto__' ? '__auto__' : e.target.value)}
         style={{ ...inpS, width: 120, padding: '4px 8px', fontSize: 11,
