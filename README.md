@@ -1,145 +1,99 @@
 # Linear Initiative Planner
 
-An internal planning tool that connects to your Linear workspace and generates a forward-looking delivery plan across cycles — respecting team capacity, label-based skill assignments, project priority ordering, and issue priorities.
+An internal planning tool that connects to your Linear workspace and generates a forward-looking delivery plan across cycles — respecting team capacity, label-based skill assignments, project priority ordering, issue dependencies, and committed work (PTO, on-call, etc.).
+
+---
+
+## Quick Start
+
+```bash
+git clone https://github.com/Pulley-Product/linear-planner.git
+cd linear-planner
+npm install
+npm start
+```
+
+Open http://localhost:5173 and paste your Linear API key.
+
+To get your API key: **linear.app → Settings → Security & Access → Personal API Keys → New API Key** (select read-only permissions).
 
 ---
 
 ## What it does
 
-1. Connects live to your Linear workspace via a local proxy (no data leaves your machine)
-2. Lets you pick a team, a start cycle, and which initiatives to plan
-3. Maps issue labels (e.g. "frontend", "backend") to team members
-4. Auto-sorts issues by `[N]` prefix in the title (e.g. `[1] Build login`, `[2] Add dashboard`)
-5. Lets you drag to reorder, pin assignees, mark issues as blocked, and set estimates
-6. Generates a cycle-based plan grid: one row per person, one column per cycle, colour-coded by project
+The planner guides you through a step-by-step wizard:
+
+1. **Connect** — paste your Linear API key (stored locally in your browser only)
+2. **Team & Members** — pick the team and select which members to include in the plan
+3. **Start Cycle** — choose which cycle planning starts from
+4. **Initiatives** — select which initiatives to plan
+5. **Projects** — pick specific projects from those initiatives
+6. **Project Priority** — drag projects into priority order and set project dependencies
+7. **Issue States** — filter which issue states to include (backlog, started, etc.)
+8. **Label & Estimate** — set labels, estimates, and member assignments for each issue
+9. **Order Issues** — drag to reorder issues within each project, set issue dependencies
+10. **Labels > Team Members** — map labels to team members (who can work on what)
+11. **Capacity** — set story points per cycle for each team member
+12. **Plan** — generate the forward plan with a spreadsheet view and downloadable .xlsx
 
 ---
 
-## Requirements
+## Prepare your Linear workspace
 
-- Node.js 18 or higher (`node --version` to check)
-- A Linear workspace with at least one initiative and active cycles
-- A Linear Personal API Key (read-only)
+For best results, set up the following in Linear before generating a plan:
 
----
-
-## Setup
-
-### 1. Clone and install
-
-```bash
-git clone <your-repo-url>
-cd linear-planner
-npm install
-```
-
-### 2. Create your Linear API key
-
-1. Go to **linear.app → Settings → API → Personal API Keys**
-2. Click **Create key**, give it a name like "Planner"
-3. **Important: select read-only permissions only**
-4. Copy the key — you'll paste it into the app
-
-### 3. Run the app
-
-Open **two terminal tabs**:
-
-**Tab 1 — start the proxy:**
-```bash
-npm run proxy
-```
-You should see: `✅ Linear proxy running on http://localhost:3131`
-
-**Tab 2 — start the app:**
-```bash
-npm run dev
-```
-
-Open your browser at **http://localhost:5173**
-
-### 4. First time use
-
-1. Paste your API key and click Connect
-2. Pick your team, start cycle, and initiatives
-3. Map labels to team members
-4. Set issue estimates and drag to order
-5. Generate your plan
-
-Your ordering, assignments, and capacity settings are saved in your browser's localStorage automatically.
+- **Add estimates** to issues — the planner uses story points to allocate work across cycles
+- **Add labels** like `frontend`, `backend`, `design` — during planning you'll map these to team members so the planner knows who can work on what
+- **Use [N] prefixes** in issue titles for ordering — e.g. `[1] Set up auth`, `[2] Build dashboard`, `[2.1] Dashboard UI`
+- **Create an initiative for capacity constraints** (e.g. "OnCall/PTO/Holiday/Other") with projects for on-call rotations, PTO, and holidays. Add issues for each person's known absences, assign them to the right person and cycle, and set estimates. The planner will schedule around these.
+- **Assign issues to cycles** for any committed/in-progress work — the planner respects these and schedules remaining work around them
 
 ---
 
-## Issue ordering
+## How the scheduling algorithm works
 
-Add a `[N]` prefix to issue titles in Linear to control priority order:
+The planner works in two passes:
 
-```
-[1] Set up authentication
-[2] Build dashboard
-[2.1] Dashboard data layer
-[2.2] Dashboard UI
-[3] Write tests
-```
+**Pass 1 — Committed work first:** All issues already assigned to a cycle in Linear (PTO, on-call, in-progress work) are placed first. This blocks capacity so the planner knows what time is actually available.
 
-The planner auto-sorts by these numbers. No manual dragging needed. Gaps are fine — `[1]`, `[5]`, `[10]` works just as well.
+**Pass 2 — Schedule everything else:** Projects are processed in priority order. Within each project, issues are processed in your chosen order. For each issue:
+- It finds the earliest possible cycle (respecting project and issue dependencies)
+- It picks who should do it (your explicit assignment, the Linear assignee, or auto-pick by label)
+- It fills their available capacity, splitting across cycles if needed
+- No member ever exceeds their capacity in any cycle
+
+---
+
+## What gets saved between sessions
+
+**Persisted** (survives reload): team selection, cycle, initiatives, projects, project order & dependencies, issue dependencies, issue states, label-to-member mappings, member capacity.
+
+**Session only** (resets on reload): labels, estimates, member assignments, issue ordering — these always come fresh from Linear. Changes made during planning are for that session only.
 
 ---
 
 ## Architecture
 
 ```
-Browser (React app)
+Browser (React app on localhost:5173)
     ↓  fetch to localhost:3131
-proxy.js (Node.js, runs locally)
+proxy.js (Node.js CORS proxy, runs locally)
     ↓  forwards to
-api.linear.app (Linear's API)
+api.linear.app (Linear's GraphQL API)
 ```
 
-Your Linear API key and all data stay on your machine. The proxy only runs locally and forwards requests to Linear — nothing is sent to any third party.
+Your API key and all data stay on your machine. Nothing is sent to any third party.
 
 ---
 
-## Decisions & future improvements
+## Requirements
 
-This section documents the current technical decisions and what should be changed when the tool becomes more widely used.
-
-| Area | Current approach | Change when... |
-|------|-----------------|----------------|
-| **Authentication** | Personal API key per user, stored in localStorage | Switch to **Linear OAuth** with read-only scope — no keys to manage, proper auth flow, users log in via Linear's own login screen |
-| **Proxy** | Local `proxy.js` — each user runs it on their own machine | Host a **shared internal proxy** on company infrastructure (e.g. internal server, AWS Lambda) so users just open a URL |
-| **Data persistence** | localStorage — per-user, per-browser | Move to a **shared backend** (e.g. a small database) so the team sees the same plan and changes sync across users |
-| **Permissions** | API key has access to everything the user can see in Linear | OAuth will scope to read-only; add **project-level filtering** in the app so users can restrict which projects the tool sees |
-| **Deployment** | Run locally with `npm run dev` | Host internally so anyone on the team can open a URL without any setup |
-| **Issue ordering** | `[N]` prefix in Linear titles | Consider using Linear's native priority field or a custom field instead |
-| **Multi-user planning** | Not supported — each user has their own plan | Add collaboration so the team lead's ordering/assignments are shared |
-
----
-
-## Contributing / extending
-
-The codebase is split into logical components:
-
-```
-src/
-  App.jsx                        # Main orchestrator — step flow and shared state
-  components/
-    StepConnect.jsx              # Step 0: Connect to Linear
-    StepSetup.jsx                # Steps 1-6: Team, Cycle, Initiatives, Labels, Unlabelled, Proj Order
-    StepOrder.jsx                # Step 7: Drag-to-order issues, assign, block
-    StepEstimatesCapacity.jsx    # Steps 8-9: Estimates and capacity
-    PlanView.jsx                 # Step 10: The plan grid
-    ui.jsx                       # Shared design system components
-  utils/
-    linear.js                    # Linear API calls and GraphQL queries
-    plan.js                      # Scheduling algorithm (pure function, no React)
-    storage.js                   # localStorage helpers
-proxy.js                         # Local CORS proxy (Node.js)
-```
-
-The scheduling algorithm in `src/utils/plan.js` is a pure function — easy to test and extend independently of the UI.
+- Node.js 18 or higher
+- A Linear workspace with initiatives, projects, and active cycles
+- A Linear Personal API Key (read-only)
 
 ---
 
 ## License
 
-Internal use. Contact [your name] with questions.
+Internal use. Contact Tamar Shor with questions.
