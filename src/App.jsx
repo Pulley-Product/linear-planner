@@ -461,6 +461,7 @@ export default function App() {
               plan={plan} getCap={getCap}
               chosenInits={chosenInits} projOrder={projOrder}
               orderMap={orderMap} initId={init?.id} issueLabels={issueLabels}
+              teamName={team?.name || 'Team'}
               onBack={() => setStep(10)}
             />
           )}

@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import { SEG, GBtn, Btn } from './ui.jsx'
 import { getOrdered } from '../utils/plan.js'
-import ExcelJS from 'exceljs'
-import { saveAs } from 'file-saver'
+// ExcelJS and file-saver loaded dynamically on download to avoid browser polyfill issues
 
-export default function PlanView({ issues, projects, members, plan, getCap, chosenInits, projOrder, orderMap, initId, issueLabels, onBack, onOrder }) {
+export default function PlanView({ issues, projects, members, plan, getCap, chosenInits, projOrder, orderMap, initId, issueLabels, teamName, onBack, onOrder }) {
   const [showAlgo, setShowAlgo] = useState(false)
   const { sc, splits, mems, cycles, startCI, unscheduled, errors } = plan
 
@@ -113,6 +112,8 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
 
   // ── Download XLSX ──────────────────────────────────────────────────────────
   const downloadXlsx = async () => {
+    const ExcelJS = (await import('exceljs')).default
+    const { saveAs } = await import('file-saver')
     const wb = new ExcelJS.Workbook()
     const ws = wb.addWorksheet('Plan')
 
@@ -294,6 +295,10 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
     ws.addRow([])
     const verifyTitleRow = ws.addRow(['VERIFICATION'])
     verifyTitleRow.getCell(1).font = { bold: true, size: 12 }
+    const verifyExplainRow = ws.addRow(['This section checks that the SUMIF formulas in the member allocation table above match the values calculated by the Linear Planner app. "OK" (green) means they match. "MISMATCH" (red) means the formula result differs from the app — investigate if you see this.'])
+    ws.mergeCells(verifyExplainRow.number, 1, verifyExplainRow.number, totalColIdx)
+    verifyExplainRow.getCell(1).font = { size: 9, italic: true, color: { argb: 'FF9A9A9E' } }
+    verifyExplainRow.getCell(1).alignment = { wrapText: true }
 
     const vhRow = ws.addRow(['', '', '', 'Type', 'Member', ...displayCycles.map(c => cycleLabel(c)), 'Total'])
     vhRow.eachCell((cell) => { Object.assign(cell, lightHeader); cell.border = thinBorder })
@@ -365,7 +370,10 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
 
     // ── Write file ──
     const buf = await wb.xlsx.writeBuffer()
-    saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'plan.xlsx')
+    const now = new Date()
+    const ts = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}-${String(now.getMinutes()).padStart(2,'0')}`
+    const safeName = (teamName || 'Team').replace(/[^a-zA-Z0-9]/g, '_')
+    saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `LP_${safeName}_${ts}.xlsx`)
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
