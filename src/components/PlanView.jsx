@@ -1,12 +1,11 @@
-import { SEG, Avatar, GBtn, SecTitle, fmtDate } from './ui.jsx'
-import { parsePfx } from '../utils/plan.js'
+import { useState } from 'react'
+import { SEG, GBtn, Btn } from './ui.jsx'
+import { getOrdered } from '../utils/plan.js'
+import * as XLSX from 'xlsx'
 
-const fmtDate2 = iso => iso
-  ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
-  : '–'
-
-export default function PlanView({ issues, projects, members, plan, blocked, getCap, onBack, onOrder }) {
-  const { sc, mems, blockedList, cycles, startCI } = plan
+export default function PlanView({ issues, projects, members, plan, getCap, chosenInits, projOrder, orderMap, initId, issueLabels, onBack, onOrder }) {
+  const [showAlgo, setShowAlgo] = useState(false)
+  const { sc, splits, mems, cycles, startCI, unscheduled, errors } = plan
 
   if (!sc.length) return <p style={{ color: '#9a9a9e', padding: 40, textAlign: 'center' }}>No issues to schedule.</p>
 
@@ -20,239 +19,375 @@ export default function PlanView({ issues, projects, members, plan, blocked, get
   const numCols = displayCycles.length
 
   const projColor = {}
-  projects.forEach((p, i) => { projColor[p.id] = SEG[i % SEG.length] })
+  const initColor = {}
 
-  // Build grid: memberId -> colIdx -> [issues]
-  const grid = {}
-  mems.forEach(m => { grid[m.id] = Array.from({ length: numCols }, () => []) })
-  const fallbackGrid = Array.from({ length: numCols }, () => [])
-
-  sc.forEach(issue => {
-    const col = issue._ci - startCI
-    if (col < 0 || col >= numCols) return
-    if (issue._m) {
-      if (!grid[issue._m.id]) grid[issue._m.id] = Array.from({ length: numCols }, () => [])
-      grid[issue._m.id][col].push(issue)
-    } else {
-      fallbackGrid[col].push(issue)
-    }
+  // Build project→initiative lookup
+  const projInitName = {}
+  chosenInits.forEach(init => {
+    (init.projects?.nodes || []).forEach(p => { projInitName[p.id] = init.name })
   })
 
-  // Sort each cell by [N] prefix
-  Object.values(grid).forEach(row => row.forEach(cell => cell.sort((a, b) => parsePfx(a.title) - parsePfx(b.title))))
-  fallbackGrid.forEach(cell => cell.sort((a, b) => parsePfx(a.title) - parsePfx(b.title)))
+  // Group projects by initiative, ordered by the earliest project priority within each initiative
+  const projPriorityIdx = {}
+  projOrder.forEach((id, i) => { projPriorityIdx[id] = i })
 
-  const fmtHdr = c => {
-    const label = c.name ? `C${c.number} ${c.name}` : `Cycle ${c.number}`
-    const dates = c.startsAt
-      ? `${new Date(c.startsAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(c.endsAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-      : ''
-    return { label, dates }
+  const initGroups = [] // [{ init, projects: [proj] }]
+  const initSeen = new Set()
+  // Walk projOrder; for each project, find its initiative and add all that initiative's projects (in priority order)
+  projOrder.forEach(pid => {
+    const init = chosenInits.find(it => (it.projects?.nodes || []).some(p => p.id === pid))
+    if (!init || initSeen.has(init.id)) return
+    initSeen.add(init.id)
+    const initProjIds = (init.projects?.nodes || []).map(p => p.id)
+    const initProjs = projOrder
+      .filter(id => initProjIds.includes(id))
+      .map(id => projects.find(p => p.id === id))
+      .filter(Boolean)
+    if (initProjs.length) initGroups.push({ init, projects: initProjs })
+  })
+
+  // Flat ordered list for the xlsx download
+  const orderedProjs = initGroups.flatMap(g => g.projects)
+
+  // Assign colors: each initiative gets a base color, projects within get shades
+  const hexToHsl = (hex) => {
+    let r = parseInt(hex.slice(1, 3), 16) / 255
+    let g = parseInt(hex.slice(3, 5), 16) / 255
+    let b = parseInt(hex.slice(5, 7), 16) / 255
+    const max = Math.max(r, g, b), min = Math.min(r, g, b)
+    let h, s, l = (max + min) / 2
+    if (max === min) { h = s = 0 } else {
+      const d = max - min
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+      if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6
+      else if (max === g) h = ((b - r) / d + 2) / 6
+      else h = ((r - g) / d + 4) / 6
+    }
+    return [h * 360, s * 100, l * 100]
+  }
+  const hslToHex = (h, s, l) => {
+    s /= 100; l /= 100
+    const a = s * Math.min(l, 1 - l)
+    const f = n => { const k = (n + h / 30) % 12; return l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1) }
+    return '#' + [f(0), f(8), f(4)].map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join('')
+  }
+  initGroups.forEach(({ init, projects: initProjs }, gi) => {
+    const baseHex = SEG[gi % SEG.length]
+    initColor[init.id] = baseHex
+    const [h, s] = hexToHsl(baseHex)
+    initProjs.forEach((proj, pi) => {
+      const count = initProjs.length
+      const lightness = count === 1 ? 45 : 35 + (pi / (count - 1)) * 20
+      projColor[proj.id] = hslToHex(h, s, lightness)
+    })
+  })
+
+  // Build member totals per cycle
+  const memberCyclePts = {} // { memberId -> { ci -> pts } }
+  sc.forEach(item => {
+    if (!item._m) return
+    const mid = item._m.id
+    if (!memberCyclePts[mid]) memberCyclePts[mid] = {}
+    const ci = item._ci - startCI
+    memberCyclePts[mid][ci] = (memberCyclePts[mid][ci] || 0) + item._pts
+  })
+
+  // Find issue's member, splits, and committed status
+  const issueInfo = (issueId) => {
+    const entry = sc.find(s => s.id === issueId)
+    return { member: entry?._m, splits: splits[issueId] || [], committed: entry?._committed || false }
   }
 
-  const totalSched = sc.filter(i => !i._committed).length
-  const totalComm = sc.filter(i => i._committed).length
-  const totalPts = sc.filter(i => !i._committed).reduce((s, i) => s + i._pts, 0)
-  const hasFallback = fallbackGrid.some(c => c.length > 0)
+  // Cycle header label
+  const cycleLabel = (c) => c.name ? `C${c.number} ${c.name}` : `Cycle ${c.number}`
+  const cycleDates = (c) => c.startsAt
+    ? `${new Date(c.startsAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(c.endsAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    : ''
 
-  const COL_W = 130
-  const NAME_W = 155
+  // Stats
+  const totalSched = sc.length
 
+  const COL_W = 80
+  const FIXED_W = 520
+
+  // ── Download XLSX ──────────────────────────────────────────────────────────
+  const downloadXlsx = () => {
+    const rows = []
+
+    // Header row 1: empty + cycle names
+    const header1 = ['', '', '', '', '']
+    displayCycles.forEach(c => header1.push(cycleLabel(c)))
+    rows.push(header1)
+
+    // Header row 2: empty + cycle dates
+    const header2 = ['', '', '', '', '']
+    displayCycles.forEach(c => header2.push(cycleDates(c)))
+    rows.push(header2)
+
+    // Member capacity rows
+    mems.forEach(m => {
+      const row = ['', '', '', '', m.name]
+      displayCycles.forEach((_, ci) => {
+        row.push(memberCyclePts[m.id]?.[ci] || '')
+      })
+      rows.push(row)
+    })
+
+    // Blank separator
+    rows.push([])
+
+    // Column headers for issues
+    const issueHeader = ['ID', 'Issue', 'Estimate', 'Label', 'Team Member']
+    displayCycles.forEach(c => issueHeader.push(cycleLabel(c)))
+    rows.push(issueHeader)
+
+    // Issue rows grouped by initiative > project
+    initGroups.forEach(({ init, projects: initProjs }) => {
+      initProjs.forEach(proj => {
+        const projIssues = getOrdered(issues, proj.id, orderMap, initId)
+        if (!projIssues.length) return
+
+        // Initiative + Project header row
+        rows.push([`${init.name} >> ${proj.name}`])
+
+        projIssues.forEach(issue => {
+          const info = issueInfo(issue.id)
+          const linearLabel = (issue.labels?.nodes || [])[0]?.name || ''
+          const label = issueLabels[issue.id] || linearLabel
+          const row = [
+            issue.identifier,
+            issue.title,
+            issue.estimate || '',
+            label,
+            info.member?.name || '',
+          ]
+          displayCycles.forEach((_, ci) => {
+            const split = info.splits.find(s => s.ci - startCI === ci)
+            row.push(split ? split.pts : '')
+          })
+          rows.push(row)
+        })
+      })
+    })
+
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+
+    // Set column widths
+    ws['!cols'] = [
+      { wch: 10 }, // ID
+      { wch: 40 }, // Issue
+      { wch: 8 },  // Estimate
+      { wch: 14 }, // Label
+      { wch: 16 }, // Member
+      ...displayCycles.map(() => ({ wch: 12 })),
+    ]
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Plan')
+    XLSX.writeFile(wb, 'plan.xlsx')
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div>
       <h1 style={{ fontWeight: 800, fontSize: 26, letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 6 }}>
         Forward <span style={{ color: '#e63946' }}>Plan</span>
       </h1>
-      <p style={{ color: '#5a5a72', marginBottom: 20, fontSize: 13, fontWeight: 300 }}>
-        Colour = project · solid border = scheduled · dashed border = already committed in Linear
-      </p>
+      {/* Algorithm explanation — collapsible */}
+      <div style={{ marginBottom: 16 }}>
+        <div onClick={() => setShowAlgo(!showAlgo)} style={{
+          cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+          fontSize: 11, fontFamily: 'monospace', color: '#9a9a9e',
+          padding: '4px 10px', borderRadius: 6, background: '#f0efe9', border: '1px solid #dddcd5',
+        }}>
+          <span style={{ fontSize: 8, transition: 'transform 0.15s', transform: showAlgo ? 'rotate(90deg)' : 'rotate(0deg)' }}>&#9654;</span>
+          How the plan is generated
+        </div>
+        {showAlgo && (
+          <div style={{
+            marginTop: 8, padding: '16px 20px', background: 'white', border: '1px solid #dddcd5',
+            borderRadius: 10, fontSize: 12, color: '#5a5a72', lineHeight: 1.8,
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#1a1a2e', marginBottom: 8 }}>How the plan is generated</div>
+            <p style={{ margin: '0 0 10px', lineHeight: 1.8 }}>The planner works in two passes to build a realistic schedule:</p>
 
-      {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(110px,1fr))', gap: 10, marginBottom: 18 }}>
-        {[
-          { l: 'Scheduled', v: totalSched, s: 'new', c: '#457b9d' },
-          { l: 'Committed', v: totalComm, s: 'in Linear', c: '#2d6a4f' },
-          { l: 'Blocked', v: blockedList.length, s: 'skipped', c: '#e63946' },
-          { l: 'Points', v: totalPts, s: 'to plan', c: '#1a1a2e' },
-          { l: 'Cycles', v: numCols, s: 'to complete', c: '#8b5cf6' },
-        ].map(s => (
-          <div key={s.l} style={{ background: 'white', border: '1px solid #dddcd5', borderRadius: 10, padding: '12px 14px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-            <div style={{ fontFamily: 'monospace', fontSize: 9, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{s.l}</div>
-            <div style={{ fontWeight: 800, fontSize: 22, color: s.c, marginTop: 3, lineHeight: 1 }}>{s.v}</div>
-            <div style={{ fontSize: 10, color: '#9a9a9e', marginTop: 3 }}>{s.s}</div>
+            <div style={{ fontWeight: 600, color: '#1a1a2e', marginBottom: 4 }}>First: lock in what's already committed</div>
+            <p style={{ margin: '0 0 12px', lineHeight: 1.8 }}>
+              Before scheduling any new work, the planner looks at all issues that are already assigned to a cycle in Linear — things like PTO, on-call shifts, holidays, and in-progress work. These are placed first (shown with diagonal stripes in the table below). This blocks out each person's capacity so the planner knows what time is actually available. Any issues committed to cycles before your selected start cycle are ignored.
+            </p>
+
+            <div style={{ fontWeight: 600, color: '#1a1a2e', marginBottom: 4 }}>Then: schedule everything else</div>
+            <p style={{ margin: '0 0 8px', lineHeight: 1.8 }}>
+              The planner goes through your projects in the priority order you set. Within each project, it processes issues in your chosen order (or by the [N] prefix in the title if you didn't reorder them). For each issue:
+            </p>
+            <ul style={{ margin: '0 0 12px', paddingLeft: 20, lineHeight: 1.8 }}>
+              <li>It figures out the <strong>earliest cycle</strong> the issue can start — taking into account project dependencies ("project B can't start until project A finishes") and issue dependencies ("this issue can't start until that issue finishes"). New work is never placed before your selected start cycle.</li>
+              <li>It picks <strong>who should do it</strong> — if you assigned a specific person, they're used. Otherwise, it looks at the issue's label, finds all team members you mapped to that label, and picks the person who can finish the issue soonest.</li>
+              <li>It <strong>fills their available capacity</strong> starting from the earliest possible cycle. If the issue is bigger than what fits in one cycle, it spills into the next cycle(s). A person is never given more work than their capacity allows in any single cycle.</li>
+              <li>If there <strong>aren't enough cycles</strong> to fit the issue, it's flagged as unscheduled and shown in a warning above.</li>
+            </ul>
           </div>
-        ))}
+        )}
       </div>
 
-      {/* Project legend */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        {projects.map((p, pi) => {
-          const pIss = sc.filter(i => i.project?.id === p.id)
-          if (!pIss.length) return null
-          const lastCol = Math.max(...pIss.map(i => i._ci)) - startCI
-          const endCycle = displayCycles[Math.min(lastCol, displayCycles.length - 1)]
-          return (
-            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'white', border: '1px solid #dddcd5', borderRadius: 20, padding: '4px 12px', fontSize: 11, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: projColor[p.id], display: 'inline-block', flexShrink: 0 }} />
-              <span style={{ fontWeight: 600 }}>{p.name}</span>
-              <span style={{ color: '#9a9a9e', fontFamily: 'monospace', fontSize: 10 }}>
-                · ends C{endCycle?.number} · {pIss.length}i
-              </span>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Blocked callout */}
-      {blockedList.length > 0 && (
-        <div style={{ background: '#fff8f8', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 16px', marginBottom: 14 }}>
-          <div style={{ fontWeight: 600, fontSize: 12, color: '#ef4444', fontFamily: 'monospace', marginBottom: 6 }}>
-            🚫 {blockedList.length} blocked — excluded from plan
+      {/* Unscheduled warning */}
+      {unscheduled.length > 0 && (
+        <div style={{
+          background: '#fff8f8', border: '2px solid #e63946', borderRadius: 12,
+          padding: '16px 20px', marginBottom: 18,
+        }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#e63946', marginBottom: 8 }}>
+            Not enough cycles — {unscheduled.length} issue{unscheduled.length !== 1 ? 's' : ''} could not be fully scheduled
           </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {blockedList.map(i => (
-              <span key={i.id} title={blocked[i.id] || ''} style={{ fontFamily: 'monospace', fontSize: 11, background: '#fee2e2', padding: '2px 7px', borderRadius: 4, color: '#991b1b' }}>
-                {i.identifier}
-              </span>
+          <div style={{ fontSize: 12, color: '#5a5a72', marginBottom: 12, lineHeight: 1.6 }}>
+            The team's available cycles ({numCols}) don't have enough capacity to fit all the work.
+            Add more cycles in Linear for this team and regenerate the plan.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {unscheduled.map(issue => (
+              <div key={issue.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 10px', background: '#fee2e2', borderRadius: 6,
+                fontSize: 11, fontFamily: 'monospace',
+              }}>
+                <span style={{ color: '#991b1b', fontWeight: 600 }}>{issue.identifier}</span>
+                <span style={{ color: '#5a5a72', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{issue.title}</span>
+                <span style={{ color: '#991b1b' }}>{issue._remaining}pt unscheduled</span>
+                <span style={{ color: '#9a9a9e' }}>of {issue.estimate}pt</span>
+                {issue._m && <span style={{ color: '#9a9a9e' }}>({issue._m.name})</span>}
+              </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Grid */}
-      <div style={{ overflowX: 'auto', marginBottom: 20 }}>
-        <div style={{ minWidth: NAME_W + COL_W * numCols }}>
-          {/* Header */}
-          <div style={{ display: 'flex', borderBottom: '2px solid #1a1a2e', background: '#1a1a2e', borderRadius: '10px 10px 0 0' }}>
-            <div style={{ width: NAME_W, flexShrink: 0, padding: '10px 14px', color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              Member
-            </div>
-            {displayCycles.map((c, i) => {
-              const { label, dates } = fmtHdr(c)
-              return (
-                <div key={c.id} style={{ width: COL_W, flexShrink: 0, padding: '8px 10px', borderLeft: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ fontWeight: 700, fontSize: 12, color: 'white' }}>{label}</div>
-                  {dates && <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace', marginTop: 2 }}>{dates}</div>}
-                </div>
-              )
-            })}
+      {/* Errors — issues with no eligible members */}
+      {errors.length > 0 && (
+        <div style={{
+          background: '#fff8f8', border: '2px solid #e63946', borderRadius: 12,
+          padding: '16px 20px', marginBottom: 18,
+        }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#e63946', marginBottom: 8 }}>
+            {errors.length} issue{errors.length !== 1 ? 's' : ''} could not be assigned — no eligible team member
           </div>
-
-          {/* Member rows */}
-          {mems.map((m, mi) => {
-            const row = grid[m.id] || []
-            const hasWork = row.some(cell => cell.length > 0)
-            if (!hasWork) return null
-            const rowPts = Object.values(m.cp || {}).reduce((a, x) => a + x, 0)
-            return (
-              <div key={m.id} style={{ display: 'flex', borderBottom: '1px solid #e8e7e0', background: mi % 2 === 0 ? 'white' : '#fafaf9' }}>
-                <div style={{ width: NAME_W, flexShrink: 0, display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px', borderRight: '1px solid #dddcd5' }}>
-                  <Avatar name={m.name} i={mi} sz={26} />
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3 }}>{m.name}</div>
-                    <div style={{ fontSize: 10, color: '#9a9a9e', fontFamily: 'monospace', marginTop: 2 }}>{rowPts}pt total</div>
-                  </div>
-                </div>
-                {displayCycles.map((c, ci) => {
-                  const cell = row[ci] || []
-                  const usedPts = cell.reduce((s, i) => s + i._pts, 0)
-                  const over = usedPts > getCap(m.id)
-                  return (
-                    <div key={c.id} style={{ width: COL_W, flexShrink: 0, padding: '8px 8px', borderLeft: '1px solid #f0efe9', background: over ? '#fff8f8' : 'transparent', minHeight: 40 }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                        {cell.map(issue => {
-                          const col = projColor[issue.project?.id] || '#9a9a9e'
-                          const isLinear = !!(issue.cycle?.startsAt)
-                          return (
-                            <div key={issue.id} title={`${issue.title} · ${issue._pts}pt`}
-                              style={{ padding: '3px 7px', borderRadius: 5, fontSize: 10, fontFamily: 'monospace', fontWeight: 700,
-                                background: `${col}28`, color: col,
-                                border: isLinear ? `2px dashed ${col}` : `2px solid ${col}`,
-                                cursor: 'default', lineHeight: 1.4 }}>
-                              {issue.identifier}
-                            </div>
-                          )
-                        })}
-                        {over && <div style={{ fontSize: 9, color: '#ef4444', fontFamily: 'monospace', marginTop: 2 }}>⚠ {usedPts}/{getCap(m.id)}pt</div>}
-                      </div>
-                    </div>
-                  )
-                })}
+          <div style={{ fontSize: 12, color: '#5a5a72', marginBottom: 12, lineHeight: 1.6 }}>
+            These issues have a label but no team member is mapped to that label, or they have no label and no member assigned. Go back to Label & Estimate or Labels &gt; Team Members to fix.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {errors.map(issue => (
+              <div key={issue.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 10px', background: '#fee2e2', borderRadius: 6,
+                fontSize: 11, fontFamily: 'monospace',
+              }}>
+                <span style={{ color: '#991b1b', fontWeight: 600 }}>{issue.identifier}</span>
+                <span style={{ color: '#5a5a72', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{issue.title}</span>
+                <span style={{ color: '#991b1b' }}>{issue._error}</span>
               </div>
-            )
-          })}
-
-          {/* Fallback row for unassigned committed issues */}
-          {hasFallback && (
-            <div style={{ display: 'flex', borderBottom: '1px solid #e8e7e0', background: '#f0fff4' }}>
-              <div style={{ width: NAME_W, flexShrink: 0, display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px', borderRight: '1px solid #dddcd5' }}>
-                <div style={{ width: 26, height: 26, borderRadius: '50%', background: '#dcfce7', color: '#166534', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0 }}>✓</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#166534', marginTop: 4 }}>Unassigned<br /><span style={{ fontSize: 10, fontWeight: 400, color: '#9a9a9e' }}>committed in Linear</span></div>
-              </div>
-              {displayCycles.map((c, ci) => {
-                const cell = fallbackGrid[ci] || []
-                return (
-                  <div key={c.id} style={{ width: COL_W, flexShrink: 0, padding: '8px 8px', borderLeft: '1px solid #dcfce7', minHeight: 40 }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {cell.map(issue => {
-                        const col = projColor[issue.project?.id] || '#22c55e'
-                        return (
-                          <div key={issue.id} title={issue.title}
-                            style={{ padding: '3px 7px', borderRadius: 5, fontSize: 10, fontFamily: 'monospace', fontWeight: 700,
-                              background: `${col}28`, color: col, border: `2px dashed ${col}`, cursor: 'default', lineHeight: 1.4 }}>
-                            {issue.identifier}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          <div style={{ height: 2, background: '#1a1a2e', borderRadius: '0 0 10px 10px' }} />
+            ))}
+          </div>
         </div>
+      )}
+
+      {/* Summary table — initiatives and projects with end dates */}
+      <div style={{ background: 'white', border: '1px solid #dddcd5', borderRadius: 12, padding: 20, marginBottom: 18, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: '#f5f4f0' }}>
+              <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Initiative / Project</th>
+              <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Linear Target Date</th>
+              <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Planned End Cycle</th>
+              <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Planned End Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {initGroups.map(({ init, projects: initProjs }) => {
+              // Find the latest cycle across all projects in this initiative
+              const initIssues = sc.filter(s => initProjs.some(p => p.id === s.project?.id))
+              const initMaxCI = initIssues.length ? Math.max(...initIssues.map(s => s._ci)) - startCI : -1
+              const initEndCycle = initMaxCI >= 0 ? displayCycles[Math.min(initMaxCI, displayCycles.length - 1)] : null
+              return [
+                <tr key={`init-${init.id}`} style={{ background: '#f9f9f7' }}>
+                  <td style={{ padding: '8px 12px', fontWeight: 700, fontSize: 13 }}>{init.name}</td>
+                  <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
+                    {init.targetDate ? new Date(init.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
+                  </td>
+                  <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>
+                    {initEndCycle ? cycleLabel(initEndCycle) : '–'}
+                  </td>
+                  <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
+                    {initEndCycle?.endsAt ? new Date(initEndCycle.endsAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
+                  </td>
+                </tr>,
+                ...initProjs.map(proj => {
+                  const pIss = sc.filter(s => s.project?.id === proj.id)
+                  const pMaxCI = pIss.length ? Math.max(...pIss.map(s => s._ci)) - startCI : -1
+                  const pEndCycle = pMaxCI >= 0 ? displayCycles[Math.min(pMaxCI, displayCycles.length - 1)] : null
+                  // Look up targetDate from the initiative's project data
+                  const projData = (init.projects?.nodes || []).find(p => p.id === proj.id)
+                  return (
+                    <tr key={`proj-${proj.id}`} style={{ borderBottom: '1px solid #f0efe9' }}>
+                      <td style={{ padding: '6px 12px 6px 28px', fontSize: 12, color: '#5a5a72' }}>
+                        <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: projColor[proj.id], marginRight: 8, verticalAlign: 'middle' }} />
+                        {proj.name}
+                      </td>
+                      <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
+                        {projData?.targetDate ? new Date(projData.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
+                      </td>
+                      <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontSize: 11 }}>
+                        {pEndCycle ? cycleLabel(pEndCycle) : '–'}
+                      </td>
+                      <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
+                        {pEndCycle?.endsAt ? new Date(pEndCycle.endsAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
+                      </td>
+                    </tr>
+                  )
+                })
+              ]
+            })}
+          </tbody>
+        </table>
       </div>
 
-      {/* Project summary table */}
-      <div style={{ background: 'white', border: '1px solid #dddcd5', borderRadius: 12, padding: 20, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
-        <SecTitle>Project Summary</SecTitle>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+      {/* Combined scrollable area: member allocation + issue spreadsheet */}
+      <div style={{ overflowX: 'auto', marginBottom: 20, paddingBottom: 16 }}>
+        <div style={{ minWidth: FIXED_W + COL_W * numCols }}>
+
+          {/* Per-member allocation table */}
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 16 }}>
             <thead>
-              <tr style={{ background: '#f5f4f0' }}>
-                {['Project', 'Start', 'End', 'Issues', 'Pts', ...mems.map(m => m.name.split(' ')[0])].map(h => (
-                  <th key={h} style={{ padding: '7px 10px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5', whiteSpace: 'nowrap' }}>{h}</th>
+              <tr style={{ background: '#1a1a2e', borderRadius: '10px 10px 0 0' }}>
+                <th style={{ width: FIXED_W, padding: '8px 10px', textAlign: 'left', fontFamily: 'monospace', fontSize: 9, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Team Member</th>
+                {displayCycles.map(c => (
+                  <th key={c.id} style={{ width: COL_W, padding: '6px 8px', textAlign: 'center', color: 'white', fontFamily: 'monospace', fontSize: 10, fontWeight: 700, borderLeft: '1px solid rgba(255,255,255,0.1)' }}>
+                    {cycleLabel(c)}
+                    <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)', fontWeight: 400, marginTop: 2 }}>{cycleDates(c)}</div>
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {projects.map((proj, pi) => {
-                const pIss = sc.filter(i => i.project?.id === proj.id)
-                if (!pIss.length) return null
-                const minCol = Math.min(...pIss.map(i => i._ci - startCI))
-                const maxCol = Math.max(...pIss.map(i => i._ci - startCI))
-                const startC = displayCycles[Math.max(0, minCol)]
-                const endC = displayCycles[Math.min(maxCol, displayCycles.length - 1)]
-                const pts = pIss.filter(i => !i._committed).reduce((s, i) => s + i._pts, 0)
+              {mems.map((m, mi) => {
+                const hasWork = Object.keys(memberCyclePts[m.id] || {}).length > 0
+                if (!hasWork) return null
+                const totalMemberPts = Object.values(memberCyclePts[m.id] || {}).reduce((a, b) => a + b, 0)
                 return (
-                  <tr key={proj.id} style={{ borderBottom: '1px solid #f0efe9' }}>
-                    <td style={{ padding: '8px 10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ width: 9, height: 9, borderRadius: 2, background: projColor[proj.id], display: 'inline-block', flexShrink: 0 }} />
-                        <span style={{ fontWeight: 600 }}>{proj.name}</span>
-                      </div>
+                  <tr key={m.id} style={{ background: mi % 2 === 0 ? '#f9f9f7' : 'white', borderBottom: '1px solid #f0efe9' }}>
+                    <td style={{ width: FIXED_W, padding: '8px 10px', fontWeight: 600, fontSize: 12 }}>
+                      {m.name}
+                      <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#9a9a9e', marginLeft: 6 }}>cap: {m.cap}pt/cycle</span>
                     </td>
-                    <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72', whiteSpace: 'nowrap' }}>{fmtDate2(startC?.startsAt)}</td>
-                    <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72', whiteSpace: 'nowrap' }}>{fmtDate2(endC?.endsAt)}</td>
-                    <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>{pIss.length}</td>
-                    <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>{pts}</td>
-                    {mems.map(m => {
-                      const cnt = pIss.filter(i => !i._committed && i._m?.id === m.id).length
+                    {displayCycles.map((_, ci) => {
+                      const pts = memberCyclePts[m.id]?.[ci] || 0
+                      const over = pts > m.cap
                       return (
-                        <td key={m.id} style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, color: cnt > 0 ? '#1a1a2e' : '#dddcd5', textAlign: 'center', fontWeight: cnt > 0 ? 600 : 400 }}>
-                          {cnt > 0 ? cnt : '–'}
+                        <td key={ci} style={{
+                          width: COL_W, padding: '6px 8px', textAlign: 'center', fontFamily: 'monospace', fontSize: 12, fontWeight: 600,
+                          borderLeft: '1px solid #f0efe9',
+                          color: over ? '#e63946' : pts > 0 ? '#1a1a2e' : '#dddcd5',
+                          background: over ? '#fff8f8' : 'transparent',
+                        }}>
+                          {pts > 0 ? pts : '–'}
                         </td>
                       )
                     })}
@@ -261,12 +396,95 @@ export default function PlanView({ issues, projects, members, plan, blocked, get
               })}
             </tbody>
           </table>
+
+          {/* Legend for diagonal stripes */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, fontSize: 11, color: '#9a9a9e' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 20, height: 14, borderRadius: 3, background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)' }} />
+              <span>Scheduled by planner</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 20, height: 14, borderRadius: 3, background: 'repeating-linear-gradient(135deg, rgba(59,130,246,0.22), rgba(59,130,246,0.22) 4px, rgba(59,130,246,0.08) 4px, rgba(59,130,246,0.08) 8px)', border: '1px solid rgba(59,130,246,0.3)' }} />
+              <span>Committed in Linear (assigned to a cycle)</span>
+            </div>
+          </div>
+
+          {/* Issue spreadsheet table */}
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr style={{ background: '#1a1a2e' }}>
+                {['ID', 'Issue', 'Est', 'Label', 'Member'].map(h => (
+                  <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontFamily: 'monospace', fontSize: 9, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+                {displayCycles.map(c => (
+                  <th key={c.id} style={{ width: COL_W, padding: '6px 8px', textAlign: 'center', color: 'white', fontFamily: 'monospace', fontSize: 10, fontWeight: 700, borderLeft: '1px solid rgba(255,255,255,0.1)' }}>
+                    {cycleLabel(c)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {/* Issue rows grouped by initiative > project */}
+              {initGroups.map(({ init, projects: initProjs }) => {
+                return initProjs.map((proj, pi) => {
+                  const projIssues = getOrdered(issues, proj.id, orderMap, initId)
+                            if (!projIssues.length) return null
+                  const color = projColor[proj.id]
+                  return [
+                    // Project header row
+                    <tr key={`h-${proj.id}`} style={{ background: `${color}12` }}>
+                      <td colSpan={5 + numCols} style={{ padding: '8px 10px', fontWeight: 700, fontSize: 12 }}>
+                        <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: color, marginRight: 8, verticalAlign: 'middle' }} />
+                        <span style={{ color: '#9a9a9e', fontWeight: 400 }}>{init.name}</span>
+                        <span style={{ color: '#c8c7be', margin: '0 5px' }}>&gt;&gt;</span>
+                        {proj.name}
+                        <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', marginLeft: 8 }}>{projIssues.length} issues</span>
+                      </td>
+                    </tr>,
+                    // Issue rows
+                    ...projIssues.map((issue, idx) => {
+                      const info = issueInfo(issue.id)
+                      const linearLabel = (issue.labels?.nodes || [])[0]?.name || ''
+                      const label = issueLabels[issue.id] || linearLabel
+                      const isUnscheduled = unscheduled.some(u => u.id === issue.id)
+                      return (
+                        <tr key={issue.id} style={{ borderBottom: '1px solid #f0efe9', background: isUnscheduled ? '#fff8f8' : idx % 2 === 0 ? 'white' : '#fafaf9' }}>
+                          <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: 10, color: isUnscheduled ? '#e63946' : '#9a9a9e', whiteSpace: 'nowrap' }}>{issue.identifier}</td>
+                          <td style={{ padding: '5px 10px', fontSize: 12, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{issue.title}</td>
+                          <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: 11, textAlign: 'center', fontWeight: 600 }}>{issue.estimate || '–'}</td>
+                          <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: 10, color: '#5a5a72' }}>{label}</td>
+                          <td style={{ padding: '5px 10px', fontSize: 11, color: '#5a5a72', whiteSpace: 'nowrap' }}>{info.member?.name || '–'}</td>
+                          {displayCycles.map((_, ci) => {
+                            const split = info.splits.find(s => s.ci - startCI === ci)
+                            const committedBg = split && info.committed
+                              ? `repeating-linear-gradient(135deg, ${color}35, ${color}35 4px, ${color}15 4px, ${color}15 8px)`
+                              : undefined
+                            return (
+                              <td key={ci} style={{
+                                padding: '5px 8px', textAlign: 'center', fontFamily: 'monospace', fontSize: 11, fontWeight: 600,
+                                borderLeft: '1px solid #f0efe9',
+                                background: committedBg || (split ? `${color}18` : 'transparent'),
+                                color: split ? color : '#dddcd5',
+                              }}>
+                                {split ? split.pts : ''}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )
+                    })
+                  ]
+                })
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 
+
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 20 }}>
         <GBtn onClick={onBack}>← Capacity</GBtn>
-        <GBtn onClick={onOrder}>Edit Order</GBtn>
+        <Btn onClick={downloadXlsx}>Download .xlsx</Btn>
       </div>
     </div>
   )

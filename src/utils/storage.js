@@ -11,7 +11,8 @@ export function loadStorage() {
 
 export function saveStorage(data) {
   try {
-    localStorage.setItem(SK, JSON.stringify(data))
+    const existing = loadStorage()
+    localStorage.setItem(SK, JSON.stringify({ ...existing, ...data }))
   } catch (e) {
     console.warn('Storage save failed:', e)
   }

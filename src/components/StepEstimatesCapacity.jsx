@@ -52,8 +52,15 @@ function EstimateRow({ issue, idx, setEst }) {
 }
 
 // ── Step: Estimates ────────────────────────────────────────────────────────
-export function StepEstimates({ chosenInits, projects, issues, orderMap, initId, setEst, err, onNext, onBack }) {
+export function StepEstimates({ chosenInits, projects, issues, projOrder, orderMap, initId, setEst, err, onNext, onBack }) {
   const unestCount = issues.filter(i => !i.estimate || i.estimate <= 0).length
+
+  const projInitName = {}
+  chosenInits.forEach(init => {
+    (init.projects?.nodes || []).forEach(p => { projInitName[p.id] = init.name })
+  })
+
+  const orderedProjs = projOrder.map(id => projects.find(p => p.id === id)).filter(Boolean)
 
   return (
     <div>
@@ -63,40 +70,38 @@ export function StepEstimates({ chosenInits, projects, issues, orderMap, initId,
         {unestCount} unestimated · {issues.filter(i => i.estimate > 0).length} estimated
       </div>
       {err && <div style={{ color: '#e63946', fontFamily: 'monospace', fontSize: 12, marginBottom: 14, padding: '9px 13px', background: 'rgba(230,57,70,0.08)', borderRadius: 6, border: '1px solid rgba(230,57,70,0.2)' }}>{err}</div>}
-      {chosenInits.map(it => {
-        const itProjs = (it.projects?.nodes || []).filter(p => projects.find(pp => pp.id === p.id))
-        if (!itProjs.length) return null
+      {orderedProjs.map((proj, pi) => {
+        const projIssues = getOrdered(issues, proj.id, orderMap, initId)
+        if (!projIssues.length) return null
+        const unest = projIssues.filter(i => !i.estimate || i.estimate <= 0).length
         return (
-          <div key={it.id} style={{ marginBottom: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#9a9a9e', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>Initiative</div>
-              <div style={{ fontSize: 15, fontWeight: 800 }}>{it.name}</div>
-              <div style={{ flex: 1, height: 2, background: '#e8e7e0', borderRadius: 1 }} />
+          <div key={proj.id} style={{ background: 'white', border: '1px solid #dddcd5', borderRadius: 12, padding: 18, marginBottom: 8, boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 11 }}>
+              <div style={{
+                width: 24, height: 24, borderRadius: 5, flexShrink: 0,
+                background: '#1a1a2e', color: 'white',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, fontWeight: 700, fontFamily: 'monospace',
+              }}>
+                {pi + 1}
+              </div>
+              <div style={{ fontSize: 13 }}>
+                <span style={{ fontWeight: 400, color: '#9a9a9e' }}>{projInitName[proj.id] || 'Unknown'}</span>
+                <span style={{ color: '#c8c7be', margin: '0 5px' }}>&gt;&gt;</span>
+                <span style={{ fontWeight: 700 }}>{proj.name}</span>
+              </div>
+              <span style={{ fontFamily: 'monospace', fontSize: 10, background: '#f0efe9', border: '1px solid #dddcd5', color: '#9a9a9e', padding: '2px 6px', borderRadius: 4 }}>
+                {projIssues.length} issues
+              </span>
+              {unest > 0 && (
+                <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#e63946', background: '#fff7ed', border: '1px solid #fed7aa', padding: '2px 6px', borderRadius: 4 }}>
+                  {unest} need estimates
+                </span>
+              )}
             </div>
-            {itProjs.map((p, pi) => {
-              const projIssues = getOrdered(issues, p.id, orderMap, initId)
-              if (!projIssues.length) return null
-              const unest = projIssues.filter(i => !i.estimate || i.estimate <= 0).length
-              return (
-                <div key={p.id} style={{ background: 'white', border: '1px solid #dddcd5', borderRadius: 12, padding: 18, marginBottom: 12, boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 11 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 2, background: SEG[pi % SEG.length], flexShrink: 0, display: 'inline-block' }} />
-                    <span style={{ fontWeight: 700, fontSize: 14 }}>{p.name}</span>
-                    <span style={{ fontFamily: 'monospace', fontSize: 10, background: '#f0efe9', border: '1px solid #dddcd5', color: '#9a9a9e', padding: '2px 6px', borderRadius: 4 }}>
-                      {projIssues.length} issues
-                    </span>
-                    {unest > 0 && (
-                      <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#e63946', background: '#fff7ed', border: '1px solid #fed7aa', padding: '2px 6px', borderRadius: 4 }}>
-                        {unest} need estimates
-                      </span>
-                    )}
-                  </div>
-                  {projIssues.map((issue, idx) => (
-                    <EstimateRow key={issue.id} issue={issue} idx={idx} setEst={setEst} />
-                  ))}
-                </div>
-              )
-            })}
+            {projIssues.map((issue, idx) => (
+              <EstimateRow key={issue.id} issue={issue} idx={idx} setEst={setEst} />
+            ))}
           </div>
         )
       })}

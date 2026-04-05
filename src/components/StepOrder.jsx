@@ -1,197 +1,372 @@
 import { useState, useRef, useEffect } from 'react'
-import { SEG, Avatar, Btn, GBtn, Card, Row, H1, R, Sub, SaveDot, inpS } from './ui.jsx'
+import { Btn, GBtn, Check, Row, H1, R, Sub } from './ui.jsx'
 import { getOrdered } from '../utils/plan.js'
 
-function IssueRow({ issue, idx, pin, hasE, isBlocked, isCommitted, isEditingBlock,
-  eligible, members, lbls, onAssign, onStartBlock, onUnblock, onCommitBlock,
-  blockVal, setBlockVal, startIso }) {
-
-  const col = issue.labels?.nodes?.find(l => l.name === lbls[0])?.color
+// ── Issue Row ────────────────────────────────────────────────────────────────
+function IssueRow({ issue, idx, isDragging, issueLabels, deps, onOpenDepModal, isCommitted }) {
+  const linearLabel = (issue.labels?.nodes || [])[0]?.name || ''
+  const effectiveLabel = issueLabels[issue.id] || linearLabel
+  const hasEst = issue.estimate != null && issue.estimate > 0
+  const cycleName = issue.cycle?.number ? `C${issue.cycle.number}` : null
 
   return (
-    <div>
-      <div
+    <div
+      style={{
+        display: 'flex', alignItems: 'center', gap: 7,
+        background: isCommitted ? '#f0fff4' : 'white',
+        border: `1.5px solid ${isCommitted ? '#bbf7d0' : '#dddcd5'}`,
+        borderRadius: 8, padding: '7px 10px',
+        userSelect: 'none',
+        opacity: isDragging ? 0.4 : 1,
+        transition: 'opacity 0.15s',
+      }}
+    >
+      {!isCommitted && <span style={{ color: '#c8c7be', fontSize: 14, flexShrink: 0, cursor: 'grab' }}>⠿</span>}
+      {isCommitted && <span style={{ fontSize: 10, flexShrink: 0, color: '#166534' }}>&#x1F512;</span>}
+      <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', width: 16, textAlign: 'center', flexShrink: 0 }}>{idx + 1}</span>
+      <span style={{ fontFamily: 'monospace', fontSize: 10, background: '#f0efe9', color: '#9a9a9e', padding: '2px 5px', borderRadius: 4, flexShrink: 0 }}>
+        {issue.identifier}
+      </span>
+      <span style={{ flex: 1, fontSize: 12, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+        {issue.title}
+      </span>
+      {effectiveLabel && (
+        <span style={{ fontSize: 9, fontFamily: 'monospace', padding: '2px 6px', borderRadius: 4, background: '#f0efe9', color: '#9a9a9e', flexShrink: 0 }}>
+          {effectiveLabel}
+        </span>
+      )}
+      {hasEst && (
+        <span style={{ fontFamily: 'monospace', fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#1a1a2e', color: 'white', flexShrink: 0 }}>
+          {issue.estimate}pt
+        </span>
+      )}
+      {isCommitted && cycleName && (
+        <span style={{ fontSize: 9, fontFamily: 'monospace', padding: '2px 6px', borderRadius: 4, background: '#bbf7d0', color: '#166534', flexShrink: 0 }}>
+          {cycleName}
+        </span>
+      )}
+      {/* Dependency button — not draggable */}
+      <button
+        type="button"
+        onMouseDown={e => e.stopPropagation()}
+        onDragStart={e => { e.preventDefault(); e.stopPropagation() }}
+        draggable={false}
+        onClick={e => { e.stopPropagation(); e.preventDefault(); onOpenDepModal(issue.id) }}
         style={{
-          display: 'flex', alignItems: 'center', gap: 7,
-          background: isBlocked ? '#fff8f8' : isCommitted ? '#f0fff4' : 'white',
-          border: `1.5px solid ${isBlocked ? '#fecaca' : isCommitted ? '#bbf7d0' : '#dddcd5'}`,
-          borderRadius: 8, padding: '7px 10px', marginBottom: isEditingBlock ? 0 : 4,
-          cursor: isEditingBlock ? 'default' : 'grab', userSelect: 'none',
-        }}
-      >
-        <span style={{ color: '#c8c7be', fontSize: 14, flexShrink: 0 }}>⠿</span>
-        <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', width: 16, textAlign: 'center', flexShrink: 0 }}>{idx + 1}</span>
-        <span style={{ fontFamily: 'monospace', fontSize: 10, background: '#f0efe9', color: '#9a9a9e', padding: '2px 5px', borderRadius: 4, flexShrink: 0 }}>
-          {issue.identifier}
-        </span>
-        <span style={{ flex: 1, fontSize: 12, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', opacity: isBlocked ? 0.5 : 1, textDecoration: isBlocked ? 'line-through' : 'none' }}>
-          {issue.title}
-        </span>
-        {isCommitted && (
-          <span style={{ fontSize: 9, fontFamily: 'monospace', padding: '1px 5px', borderRadius: 3, background: '#bbf7d0', color: '#166534', flexShrink: 0 }}>
-            committed
-          </span>
-        )}
-        <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-          {lbls.map(l => {
-            const lc = issue.labels?.nodes?.find(ll => ll.name === l)?.color
-            return (
-              <span key={l} style={{ fontSize: 9, fontFamily: 'monospace', padding: '1px 4px', borderRadius: 3,
-                background: lc ? `#${lc}22` : '#f0efe9', border: `1px solid ${lc ? `#${lc}55` : '#dddcd5'}`,
-                color: lc ? `#${lc}` : '#9a9a9e' }}>
-                {l}
-              </span>
-            )
-          })}
-        </div>
-        {!isBlocked && (
-          <select value={pin || ''} onChange={e => onAssign(issue.id, e.target.value)}
-            style={{ ...inpS, width: 110, padding: '3px 6px', fontSize: 11,
-              background: pin ? 'rgba(45,106,79,0.08)' : '#f0efe9',
-              borderColor: pin ? 'rgba(45,106,79,0.3)' : '#dddcd5',
-              color: pin ? '#2d6a4f' : '#5a5a72',
-            }}>
-            <option value=''>Auto</option>
-            {eligible.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-        )}
-        <span style={{ fontFamily: 'monospace', fontSize: 11, padding: '2px 6px', borderRadius: 4, flexShrink: 0,
-          background: hasE ? '#1a1a2e' : '#fef3c7',
-          color: hasE ? 'white' : '#92400e',
-          border: hasE ? 'none' : '1px solid #fde68a',
+          fontSize: 9, fontFamily: 'monospace', padding: '2px 6px', borderRadius: 4, flexShrink: 0,
+          cursor: 'pointer', whiteSpace: 'nowrap', border: 'none',
+          background: deps.length ? 'rgba(230,57,70,0.08)' : '#f0efe9',
+          color: deps.length ? '#e63946' : '#c8c7be',
+          outline: deps.length ? '1px solid rgba(230,57,70,0.2)' : 'none',
         }}>
-          {hasE ? `${issue.estimate}pt` : '–'}
-        </span>
-        {isBlocked ? (
-          <span onClick={() => onUnblock(issue.id)} title='Unblock'
-            style={{ fontSize: 10, cursor: 'pointer', color: '#ef4444', fontFamily: 'monospace', flexShrink: 0, padding: '2px 5px', background: '#fee2e2', borderRadius: 4 }}>
-            🚫 unblock
-          </span>
-        ) : (
-          <span onClick={() => onStartBlock(issue)} title='Mark as blocked'
-            style={{ fontSize: 10, cursor: 'pointer', color: '#9a9a9e', fontFamily: 'monospace', flexShrink: 0, padding: '2px 5px', background: '#f0efe9', borderRadius: 4, border: '1px solid #dddcd5' }}>
-            block
-          </span>
-        )}
-      </div>
-      {isEditingBlock && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 4, padding: '6px 8px', background: '#fff8f8', border: '1.5px solid #fecaca', borderTop: 'none', borderRadius: '0 0 8px 8px' }}>
-          <input autoFocus value={blockVal} onChange={e => setBlockVal(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') onCommitBlock(issue.id); if (e.key === 'Escape') onCommitBlock(null) }}
-            placeholder='Why is this blocked? (optional)'
-            style={{ ...inpS, flex: 1, padding: '5px 9px', fontSize: 12, background: 'white' }} />
-          <Btn onClick={() => onCommitBlock(issue.id)}>Save</Btn>
-        </div>
-      )}
-      {isBlocked && issue._blockNote && !isEditingBlock && (
-        <div style={{ fontSize: 11, color: '#ef4444', fontFamily: 'monospace', padding: '3px 8px 6px', marginTop: -4, marginBottom: 4 }}>
-          🚫 {issue._blockNote}
-        </div>
-      )}
+        {deps.length ? `${deps.length} dep${deps.length > 1 ? 's' : ''}` : 'deps'}
+      </button>
     </div>
   )
 }
 
-function ProjectBlock({ proj, pi, issues, orderMap, initId, getAssign, setAssign, members, labelMap, issueLabels, blocked, setBlockNote, getEligible, startIso, saveOrder }) {
+// ── Project Block (issues inside) ────────────────────────────────────────────
+function ProjectBlock({ proj, pi, initName, issues, orderMap, initId, issueLabels, issueDeps, setIssueDepsFor, saveOrder, startIso }) {
   const [ord, setOrd] = useState(() => getOrdered(issues, proj.id, orderMap, initId))
-  const [editingBlock, setEditingBlock] = useState(null)
-  const [blockVal, setBlockVal] = useState('')
-  const from = useRef(null)
+  const [modalIssueId, setModalIssueId] = useState(null)
+  const dragFrom = useRef(null)
+  const [dragOverIdx, setDragOverIdx] = useState(null)
+  const [draggingIdx, setDraggingIdx] = useState(null)
 
   useEffect(() => setOrd(getOrdered(issues, proj.id, orderMap, initId)), [issues, orderMap])
 
-  const drop = (e, toIdx) => {
-    e.preventDefault()
-    if (from.current == null || from.current === toIdx) return
-    const next = [...ord]
-    const [mv] = next.splice(from.current, 1)
-    next.splice(toIdx, 0, mv)
-    setOrd(next)
-    saveOrder(proj.id, next.map(i => i.id))
-    from.current = null
+  const handleDragStart = (e, idx) => {
+    dragFrom.current = idx
+    setDraggingIdx(idx)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', idx.toString())
   }
 
-  const startBlock = issue => { setEditingBlock(issue.id); setBlockVal(blocked[issue.id] || '') }
-  const commitBlock = id => { if (id) setBlockNote(id, blockVal.trim() || null); setEditingBlock(null) }
-  const unblock = id => setBlockNote(id, null)
+  const handleDragOver = (e, idx) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const rect = e.currentTarget.getBoundingClientRect()
+    const midY = rect.top + rect.height / 2
+    setDragOverIdx(e.clientY < midY ? idx : idx + 1)
+  }
+
+  const handleContainerDragOver = (e) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    // Handle dragging above first or below last item
+    const children = e.currentTarget.querySelectorAll('[data-issue-row]')
+    if (!children.length) return
+    const firstRect = children[0].getBoundingClientRect()
+    const lastRect = children[children.length - 1].getBoundingClientRect()
+    if (e.clientY < firstRect.top + firstRect.height / 2) setDragOverIdx(0)
+    else if (e.clientY > lastRect.top + lastRect.height / 2) setDragOverIdx(ord.length)
+  }
+
+  const [dropError, setDropError] = useState(null)
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    const fromIdx = dragFrom.current
+    const toGap = dragOverIdx
+    dragFrom.current = null
+    setDraggingIdx(null)
+    setDragOverIdx(null)
+
+    if (fromIdx === null || toGap === null) return
+    if (toGap === fromIdx || toGap === fromIdx + 1) return
+
+    const next = [...ord]
+    const [moved] = next.splice(fromIdx, 1)
+    const insertAt = toGap > fromIdx ? toGap - 1 : toGap
+    next.splice(insertAt, 0, moved)
+
+    // Validate: issue dependencies
+    const ids = next.map(i => i.id)
+    for (let i = 0; i < ids.length; i++) {
+      for (const depId of (issueDeps[ids[i]] || [])) {
+        const depIdx = ids.indexOf(depId)
+        if (depIdx >= 0 && depIdx > i) {
+          const issueName = next[i].identifier || next[i].title
+          const depName = next.find(x => x.id === depId)?.identifier || '?'
+          setDropError(`"${issueName}" depends on "${depName}" — "${depName}" must come first.`)
+          return
+        }
+      }
+    }
+
+    // Validate: committed issues must stay in cycle-date order relative to each other
+    const committedInOrder = next.filter(i => i.cycle?.startsAt)
+    for (let i = 1; i < committedInOrder.length; i++) {
+      if (new Date(committedInOrder[i].cycle.startsAt) < new Date(committedInOrder[i - 1].cycle.startsAt)) {
+        setDropError(`Committed issues must stay in cycle order — "${committedInOrder[i].identifier}" (${committedInOrder[i].cycle.number ? 'C' + committedInOrder[i].cycle.number : ''}) can't come before "${committedInOrder[i - 1].identifier}".`)
+        return
+      }
+    }
+
+    setDropError(null)
+    setOrd(next)
+    saveOrder(proj.id, next.map(i => i.id))
+  }
+
+  const handleDragEnd = () => {
+    dragFrom.current = null
+    setDraggingIdx(null)
+    setDragOverIdx(null)
+  }
+
+  // Issue dependency helpers
+  const wouldCreateCycle = (issueId, depId) => {
+    const visited = new Set()
+    const walk = (id) => {
+      if (id === issueId) return true
+      if (visited.has(id)) return false
+      visited.add(id)
+      return (issueDeps[id] || []).some(d => walk(d))
+    }
+    return walk(depId)
+  }
+
+  // Check if adding a dep would violate cycle date order
+  const wouldViolateCycleOrder = (issueId, depId) => {
+    const issue = ord.find(i => i.id === issueId)
+    const dep = ord.find(i => i.id === depId)
+    if (!issue || !dep) return false
+    // If the issue is committed to an earlier cycle than the dep, it's invalid
+    // (issue would need to wait for dep, but it's already committed earlier)
+    if (issue.cycle?.startsAt && dep.cycle?.startsAt) {
+      return new Date(issue.cycle.startsAt) < new Date(dep.cycle.startsAt)
+    }
+    return false
+  }
+
+  const toggleDep = (issueId, depId) => {
+    const cur = new Set(issueDeps[issueId] || [])
+    const adding = !cur.has(depId)
+    if (adding && wouldCreateCycle(issueId, depId)) return
+    if (adding && wouldViolateCycleOrder(issueId, depId)) return
+    adding ? cur.add(depId) : cur.delete(depId)
+    setIssueDepsFor(issueId, [...cur])
+    // Auto-reorder: ensure depId comes before issueId in the list
+    if (adding) {
+      const next = [...ord]
+      const issueIdx = next.findIndex(i => i.id === issueId)
+      const depIdx = next.findIndex(i => i.id === depId)
+      if (depIdx > issueIdx && depIdx !== -1 && issueIdx !== -1) {
+        const [moved] = next.splice(depIdx, 1)
+        next.splice(issueIdx, 0, moved)
+        setOrd(next)
+        saveOrder(proj.id, next.map(i => i.id))
+      }
+    }
+  }
+
+  const modalIssue = modalIssueId ? ord.find(i => i.id === modalIssueId) : null
+  const modalOthers = modalIssue ? ord.filter(i => i.id !== modalIssueId) : []
+  const modalDeps = modalIssueId ? (issueDeps[modalIssueId] || []) : []
+
+  // Check if a drop indicator line should show
+  const showLine = (gapIdx) => {
+    if (draggingIdx === null || dragOverIdx !== gapIdx) return false
+    if (gapIdx === draggingIdx || gapIdx === draggingIdx + 1) return false
+    return true
+  }
 
   return (
-    <div style={{ background: 'white', border: '1px solid #dddcd5', borderRadius: 12, padding: 18, marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 11 }}>
-        <span style={{ width: 8, height: 8, borderRadius: 2, background: SEG[pi % SEG.length], flexShrink: 0, display: 'inline-block' }} />
-        <span style={{ fontWeight: 700, fontSize: 14 }}>{proj.name}</span>
+    <div style={{ background: 'white', border: '1px solid #dddcd5', borderRadius: 12, padding: 18, marginBottom: 8, boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}>
+      {/* Project header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <div style={{
+          width: 24, height: 24, borderRadius: 5, flexShrink: 0,
+          background: '#1a1a2e', color: 'white',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 11, fontWeight: 700, fontFamily: 'monospace',
+        }}>
+          {pi + 1}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13 }}>
+            <span style={{ fontWeight: 400, color: '#9a9a9e' }}>{initName}</span>
+            <span style={{ color: '#c8c7be', margin: '0 5px' }}>&gt;&gt;</span>
+            <span style={{ fontWeight: 700 }}>{proj.name}</span>
+          </div>
+        </div>
         <span style={{ fontFamily: 'monospace', fontSize: 10, background: '#f0efe9', border: '1px solid #dddcd5', color: '#9a9a9e', padding: '2px 6px', borderRadius: 4 }}>
           {ord.length} issues
         </span>
       </div>
-      {ord.length === 0 && <div style={{ color: '#9a9a9e', fontFamily: 'monospace', fontSize: 12 }}>No backlog issues.</div>}
-      {ord.map((issue, idx) => {
-        const pin = getAssign(issue.id)
-        const hasE = issue.estimate != null && issue.estimate > 0
-        const isBlocked = blocked[issue.id] != null && blocked[issue.id] !== ''
-        const isEditingBlock = editingBlock === issue.id
-        const isCommitted = !!(issue.cycle?.startsAt && startIso)
-        const eligible = getEligible(issue)
-        const lbls = [...(issue.labels?.nodes || []).map(l => l.name), ...(issueLabels[issue.id] ? [issueLabels[issue.id]] : [])]
 
-        return (
-          <div key={issue.id} draggable={!isEditingBlock}
-            onDragStart={e => { from.current = idx; e.dataTransfer.effectAllowed = 'move' }}
-            onDragOver={e => e.preventDefault()}
-            onDrop={e => drop(e, idx)}>
-            <IssueRow
-              issue={issue} idx={idx} pin={pin} hasE={hasE}
-              isBlocked={isBlocked} isCommitted={isCommitted} isEditingBlock={isEditingBlock}
-              eligible={eligible} members={members} lbls={lbls}
-              onAssign={setAssign}
-              onStartBlock={startBlock} onUnblock={unblock} onCommitBlock={commitBlock}
-              blockVal={blockVal} setBlockVal={setBlockVal}
-              startIso={startIso}
-            />
+      {/* Issues list */}
+      {ord.length === 0 && <div style={{ color: '#9a9a9e', fontFamily: 'monospace', fontSize: 12 }}>No issues.</div>}
+      <div onDragOver={handleContainerDragOver} onDrop={handleDrop}>
+        {ord.map((issue, idx) => {
+          const deps = issueDeps[issue.id] || []
+          const isCommitted = !!(issue.cycle?.startsAt && startIso)
+          return (
+            <div key={issue.id}>
+              {showLine(idx) && <div style={{ height: 3, background: '#e63946', borderRadius: 2, margin: '2px 0' }} />}
+              <div
+                data-issue-row
+                draggable
+                onDragStart={e => handleDragStart(e, idx)}
+                onDragOver={e => handleDragOver(e, idx)}
+                onDragEnd={handleDragEnd}
+                style={{ marginBottom: 4, cursor: 'grab' }}
+              >
+                <IssueRow
+                  issue={issue} idx={idx}
+                  isDragging={draggingIdx === idx}
+                  issueLabels={issueLabels}
+                  deps={deps}
+                  isCommitted={isCommitted}
+                  onOpenDepModal={setModalIssueId}
+                />
+              </div>
+              {idx === ord.length - 1 && showLine(ord.length) && <div style={{ height: 3, background: '#e63946', borderRadius: 2, margin: '2px 0' }} />}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Drop error */}
+      {dropError && (
+        <div style={{
+          color: '#e63946', fontFamily: 'monospace', fontSize: 11, marginTop: 6, marginBottom: 6,
+          padding: '8px 12px', background: 'rgba(230,57,70,0.08)',
+          borderRadius: 6, border: '1px solid rgba(230,57,70,0.2)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+        }}>
+          <span>{dropError}</span>
+          <span onClick={() => setDropError(null)} style={{ cursor: 'pointer', fontSize: 13, opacity: 0.6, flexShrink: 0 }}>✕</span>
+        </div>
+      )}
+
+      {/* Issue dependency modal */}
+      {modalIssueId && (
+        <div onClick={() => setModalIssueId(null)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(26,26,46,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'white', borderRadius: 12, padding: 24, width: 460, maxHeight: '70vh', overflowY: 'auto',
+            boxShadow: '0 12px 40px rgba(0,0,0,0.2)', border: '1px solid #e8e7e3',
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Depends on completion of</div>
+            <div style={{ fontSize: 11, color: '#9a9a9e', fontFamily: 'monospace', marginBottom: 4 }}>
+              {modalIssue?.identifier} — {modalIssue?.title}
+            </div>
+            <div style={{ fontSize: 11, color: '#9a9a9e', marginBottom: 16 }}>
+              Select issues that must finish before this one can start.
+            </div>
+            {modalOthers.map(op => {
+              const checked = modalDeps.includes(op.id)
+              const circular = !checked && wouldCreateCycle(modalIssueId, op.id)
+              const cycleViolation = !checked && wouldViolateCycleOrder(modalIssueId, op.id)
+              const disabled = circular || cycleViolation
+              return (
+                <div key={op.id} onClick={() => !disabled && toggleDep(modalIssueId, op.id)}
+                  title={circular ? 'Would create a circular dependency' : cycleViolation ? 'This issue is committed to an earlier cycle' : ''}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 12px', marginBottom: 4,
+                    background: checked ? 'rgba(230,57,70,0.05)' : '#f9f9f7',
+                    border: `1.5px solid ${checked ? 'rgba(230,57,70,0.3)' : '#e8e7e3'}`,
+                    borderRadius: 8, cursor: disabled ? 'not-allowed' : 'pointer',
+                    opacity: disabled ? 0.4 : 1,
+                  }}>
+                  <Check checked={checked} />
+                  <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', flexShrink: 0 }}>{op.identifier}</span>
+                  <span style={{ flex: 1, fontSize: 12, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{op.title}</span>
+                </div>
+              )
+            })}
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+              <Btn onClick={() => setModalIssueId(null)}>Done</Btn>
+            </div>
           </div>
-        )
-      })}
+        </div>
+      )}
     </div>
   )
 }
 
-export default function StepOrder({ chosenInits, projects, issues, orderMap, initId, getAssign, setAssign, members, labelMap, issueLabels, blocked, setBlockNote, getEligible, startIso, saveOrder, savedState, resetSaved, onNext, onBack }) {
+// ── Main Step: Order Issues ──────────────────────────────────────────────────
+export default function StepOrderIssues({
+  chosenInits, projects, issues, projOrder,
+  orderMap, initId, issueLabels, issueDeps, setIssueDepsFor, saveOrder, startIso, onNext, onBack
+}) {
+  const projInitName = {}
+  chosenInits.forEach(init => {
+    (init.projects?.nodes || []).forEach(p => { projInitName[p.id] = init.name })
+  })
+
+  const ordered = projOrder.map(id => projects.find(p => p.id === id)).filter(Boolean)
+
   return (
     <div>
-      <H1>Order & <R>Assign</R></H1>
-      <Sub>Drag to set priority. Mark issues as blocked. Assignee shows eligible members only.</Sub>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <SaveDot state={savedState} />
-        <GBtn onClick={resetSaved} sm>↺ Reset order</GBtn>
+      <H1>Order the <R>Issues</R></H1>
+      <Sub>Drag issues to set order within each project. If issues have a [N] prefix in their title (e.g. [1], [2.1]), they are auto-sorted by that number, unless you make a change here. Click "deps" to set hard dependencies between issues.</Sub>
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 14px', marginBottom: 14,
+        background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8,
+        fontSize: 11, color: '#92400e', lineHeight: 1.6,
+      }}>
+        <span style={{ flexShrink: 0, fontSize: 14 }}>&#9432;</span>
+        <span>Issue ordering on this screen is <strong>for this planning session only</strong> and will not be saved. To set a permanent order, use the [N] prefix in issue titles in Linear (e.g. [1], [2], [3]).</span>
       </div>
-      {chosenInits.map(it => {
-        const itProjs = (it.projects?.nodes || []).filter(p => projects.find(pp => pp.id === p.id))
-        if (!itProjs.length) return null
-        return (
-          <div key={it.id} style={{ marginBottom: 28 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#9a9a9e', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>Initiative</div>
-              <div style={{ fontSize: 16, fontWeight: 800 }}>{it.name}</div>
-              <div style={{ flex: 1, height: 2, background: '#e8e7e0', borderRadius: 1 }} />
-              <div style={{ fontSize: 11, color: '#9a9a9e', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                {itProjs.length} project{itProjs.length !== 1 ? 's' : ''}
-              </div>
-            </div>
-            {itProjs.map((p, pi) => (
-              <ProjectBlock key={p.id}
-                proj={projects.find(pp => pp.id === p.id) || p} pi={pi}
-                issues={issues} orderMap={orderMap} initId={initId}
-                getAssign={getAssign} setAssign={setAssign}
-                members={members} labelMap={labelMap} issueLabels={issueLabels}
-                blocked={blocked} setBlockNote={setBlockNote}
-                getEligible={getEligible} startIso={startIso}
-                saveOrder={saveOrder}
-              />
-            ))}
-          </div>
-        )
-      })}
-      <Row><GBtn onClick={onBack}>← Back</GBtn><Btn onClick={onNext}>Next: Estimates →</Btn></Row>
+
+      {ordered.map((proj, i) => (
+        <ProjectBlock key={proj.id}
+          proj={proj} pi={i} initName={projInitName[proj.id] || 'Unknown'}
+          issues={issues} orderMap={orderMap} initId={initId}
+          issueLabels={issueLabels} issueDeps={issueDeps} setIssueDepsFor={setIssueDepsFor}
+          saveOrder={saveOrder} startIso={startIso}
+        />
+      ))}
+
+      <Row>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <Btn onClick={onNext}>Next →</Btn>
+      </Row>
     </div>
   )
 }

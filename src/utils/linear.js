@@ -23,17 +23,20 @@ export async function linearQuery(apiKey, query, variables = {}) {
   return json.data ?? json
 }
 
-export const GQL_WORKSPACE = `{
+export const GQL_INITIATIVES = `{
   initiatives {
     nodes {
-      id name
-      projects { nodes { id name } }
+      id name status targetDate
+      projects { nodes { id name state targetDate } }
     }
   }
+}`
+
+export const GQL_TEAMS = `{
   teams {
     nodes {
       id name
-      members { nodes { id name } }
+      members { nodes { id name avatarUrl } }
       cycles(filter: { endsAt: { gt: "${new Date().toISOString()}" } }) {
         nodes { id name startsAt endsAt number }
       }
@@ -41,18 +44,26 @@ export const GQL_WORKSPACE = `{
   }
 }`
 
-export const GQL_ISSUES = `{
-  issues(
-    filter: { state: { type: { in: ["backlog","unstarted","started"] } } }
-    first: 250
-  ) {
-    nodes {
-      id identifier title estimate
-      assignee { id name }
-      project { id name }
-      state { name type }
-      labels { nodes { id name color } }
-      cycle { id startsAt endsAt number }
+const ISSUE_FIELDS = `
+  id identifier title estimate
+  assignee { id name }
+  project { id name }
+  state { name type }
+  labels { nodes { id name color } }
+  cycle { id startsAt endsAt number }
+`
+
+const STATE_TYPES = ['triage', 'backlog', 'unstarted', 'started', 'completed', 'cancelled']
+
+export function buildIssueQuery(stateType) {
+  return `{
+    issues(
+      filter: { state: { type: { eq: "${stateType}" } } }
+      first: 250
+    ) {
+      nodes { ${ISSUE_FIELDS} }
     }
-  }
-}`
+  }`
+}
+
+export { STATE_TYPES }
