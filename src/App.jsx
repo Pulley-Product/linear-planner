@@ -292,14 +292,7 @@ export default function App() {
   }
 
   const confirmLabelEstimate = () => {
-    // Check all issues have labels and estimates — label not required if member is assigned
-    const unlabelled = issues.filter(i => {
-      const hasLabel = (i.labels?.nodes || []).length > 0 || !!issueLabels[i.id]
-      const assignVal = getAssign(i.id)
-      const hasAssignment = (!!assignVal && assignVal !== '__auto__') || (!assignVal && !!i.assignee?.id)
-      return !hasLabel && !hasAssignment
-    })
-    if (unlabelled.length) { setErr(unlabelled.length + ' issues still need labels (or a member assignment).'); return }
+    // Check all issues have estimates
     const unest = issues.filter(i => !i.estimate || i.estimate <= 0)
     if (unest.length) { setErr(unest.length + ' issues still need estimates.'); return }
     // Clear saved issue order and rebuild from [N] prefix, then fix for dependencies
