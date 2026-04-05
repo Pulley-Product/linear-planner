@@ -146,66 +146,7 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
     for (let c = 0; c < numCols; c++) ws.getColumn(firstCycCol + c).width = 14
     ws.getColumn(totalColIdx).width = 10
 
-    // ══════════════════════════════════════════════════════════════════════
-    // SECTION 0: Summary — Initiative / Project end dates
-    // ══════════════════════════════════════════════════════════════════════
-
     const fmtD = iso => iso ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'
-
-    const summaryTitleRow = ws.addRow(['FORWARD PLAN SUMMARY'])
-    summaryTitleRow.getCell(1).font = { bold: true, size: 14, color: { argb: 'FF1A1A2E' } }
-    ws.mergeCells(summaryTitleRow.number, 1, summaryTitleRow.number, 4)
-
-    const summaryDateRow = ws.addRow([`Generated: ${new Date().toLocaleString()}`])
-    summaryDateRow.getCell(1).font = { size: 9, italic: true, color: { argb: 'FF9A9A9E' } }
-
-    ws.addRow([])
-
-    const sumHeaderRow = ws.addRow(['Initiative / Project', 'Linear Target Date', 'Planned End Cycle', 'Planned End Date'])
-    sumHeaderRow.eachCell((cell) => {
-      cell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } }
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A2E' } }
-      cell.border = thinBorder
-    })
-
-    initGroups.forEach(({ init, projects: initProjs }, gi) => {
-      // Initiative row
-      const initIssues = sc.filter(s => initProjs.some(p => p.id === s.project?.id))
-      const initMaxCI = initIssues.length ? Math.max(...initIssues.map(s => s._ci)) - startCI : -1
-      const initEndCycle = initMaxCI >= 0 ? displayCycles[Math.min(initMaxCI, displayCycles.length - 1)] : null
-      const initRow = ws.addRow([
-        init.name,
-        fmtD(init.targetDate),
-        initEndCycle ? cycleLabel(initEndCycle) : '–',
-        initEndCycle?.endsAt ? fmtD(initEndCycle.endsAt) : '–',
-      ])
-      initRow.getCell(1).font = { bold: true, size: 11 }
-      initRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F7' } }
-      initRow.eachCell((cell) => { cell.border = thinBorder })
-
-      // Project rows
-      initProjs.forEach(proj => {
-        const pIss = sc.filter(s => s.project?.id === proj.id)
-        const pMaxCI = pIss.length ? Math.max(...pIss.map(s => s._ci)) - startCI : -1
-        const pEndCycle = pMaxCI >= 0 ? displayCycles[Math.min(pMaxCI, displayCycles.length - 1)] : null
-        const projData = (init.projects?.nodes || []).find(p => p.id === proj.id)
-        const pRow = ws.addRow([
-          `    ${proj.name}`,
-          fmtD(projData?.targetDate),
-          pEndCycle ? cycleLabel(pEndCycle) : '–',
-          pEndCycle?.endsAt ? fmtD(pEndCycle.endsAt) : '–',
-        ])
-        const pColor = projColor[proj.id] || '#5a5a72'
-        pRow.getCell(1).font = { size: 10, color: { argb: 'FF' + pColor.replace('#', '') } }
-        pRow.eachCell((cell) => { cell.border = thinBorder })
-      })
-    })
-
-    // Set summary column widths (columns 1-4)
-    ws.getColumn(1).width = Math.max(ws.getColumn(1).width || 14, 35)
-
-    ws.addRow([])
-    ws.addRow([])
 
     // ══════════════════════════════════════════════════════════════════════
     // SECTION 1: Member allocation
@@ -424,6 +365,58 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
           ]
         })
       }
+    })
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SECTION 4: Summary — Initiative / Project end dates
+    // ══════════════════════════════════════════════════════════════════════
+
+    ws.addRow([])
+    const summaryTitleRow = ws.addRow(['FORWARD PLAN SUMMARY'])
+    summaryTitleRow.getCell(1).font = { bold: true, size: 14, color: { argb: 'FF1A1A2E' } }
+    ws.mergeCells(summaryTitleRow.number, 1, summaryTitleRow.number, 4)
+
+    const summaryDateRow = ws.addRow([`Generated: ${new Date().toLocaleString()}`])
+    summaryDateRow.getCell(1).font = { size: 9, italic: true, color: { argb: 'FF9A9A9E' } }
+
+    ws.addRow([])
+
+    const sumHeaderRow = ws.addRow(['Initiative / Project', 'Linear Target Date', 'Planned End Cycle', 'Planned End Date'])
+    sumHeaderRow.eachCell((cell) => {
+      cell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } }
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A2E' } }
+      cell.border = thinBorder
+    })
+
+    initGroups.forEach(({ init, projects: initProjs }) => {
+      const initIssues = sc.filter(s => initProjs.some(p => p.id === s.project?.id))
+      const initMaxCI = initIssues.length ? Math.max(...initIssues.map(s => s._ci)) - startCI : -1
+      const initEndCycle = initMaxCI >= 0 ? displayCycles[Math.min(initMaxCI, displayCycles.length - 1)] : null
+      const initRow = ws.addRow([
+        init.name,
+        fmtD(init.targetDate),
+        initEndCycle ? cycleLabel(initEndCycle) : '–',
+        initEndCycle?.endsAt ? fmtD(initEndCycle.endsAt) : '–',
+      ])
+      initRow.getCell(1).font = { bold: true, size: 11 }
+      initRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F7' } }
+      initRow.eachCell((cell) => { cell.border = thinBorder })
+
+      initProjs.forEach(proj => {
+        const pIss = sc.filter(s => s.project?.id === proj.id)
+        const pMaxCI = pIss.length ? Math.max(...pIss.map(s => s._ci)) - startCI : -1
+        const pEndCycle = pMaxCI >= 0 ? displayCycles[Math.min(pMaxCI, displayCycles.length - 1)] : null
+        const projData = (init.projects?.nodes || []).find(p => p.id === proj.id)
+        const pRow = ws.addRow([
+          `    ${proj.name}`,
+          fmtD(projData?.targetDate),
+          pEndCycle ? cycleLabel(pEndCycle) : '–',
+          pEndCycle?.endsAt ? fmtD(pEndCycle.endsAt) : '–',
+        ])
+        const pColor = projColor[proj.id] || '#5a5a72'
+        pRow.getCell(1).font = { size: 10, color: { argb: 'FF' + pColor.replace('#', '') } }
+        pRow.eachCell((cell) => { cell.border = thinBorder })
+      })
     })
 
     // ── Freeze panes ──
