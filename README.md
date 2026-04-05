@@ -94,6 +94,77 @@ Your API key and all data stay on your machine. Nothing is sent to any third par
 
 ---
 
+## Getting back up and running
+
+If the server is down and you need to start it again:
+
+```bash
+cd ~/linear-planner
+npm start
+```
+
+Then open http://localhost:5173. Your saved selections (team, initiatives, projects, etc.) are still in your browser's localStorage — you just need to reconnect with your API key.
+
+If you're on a new machine or the repo isn't cloned yet:
+
+```bash
+git clone https://github.com/Pulley-Product/linear-planner.git
+cd linear-planner
+npm install
+npm start
+```
+
+---
+
+## Making changes with Claude Code
+
+To modify this app using Claude Code:
+
+1. **Open your terminal** and navigate to the project:
+   ```bash
+   cd ~/linear-planner
+   ```
+
+2. **Start Claude Code**:
+   ```bash
+   claude
+   ```
+
+3. **Ask Claude to make changes** — for example:
+   - "Add a new column to the plan view"
+   - "Change the capacity default from 10 to 8"
+   - "Add a filter for issue priority"
+
+4. **Test your changes** — the dev server auto-reloads:
+   ```bash
+   npm start
+   ```
+   Open http://localhost:5173 and verify.
+
+5. **Commit and push** when happy:
+   ```bash
+   git add .
+   git commit -m "Description of changes"
+   git push origin main
+   ```
+
+   Or just ask Claude: "commit and push to GitHub"
+
+### Key files to know
+
+| File | What it does |
+|------|-------------|
+| `src/App.jsx` | Main app — step flow, state management, step transitions |
+| `src/utils/plan.js` | Scheduling algorithm (pure function, no UI) |
+| `src/components/PlanView.jsx` | Plan output — spreadsheet table, .xlsx export |
+| `src/components/StepSetup.jsx` | Most wizard steps (team, initiatives, projects, labels, etc.) |
+| `src/components/StepOrder.jsx` | Issue ordering step with drag-and-drop and dependencies |
+| `src/components/StepConnect.jsx` | Connect screen with API key input and prep guide |
+| `src/utils/linear.js` | Linear API GraphQL queries |
+| `proxy.js` | Local CORS proxy for Linear API |
+
+---
+
 ## License
 
 Internal use. Contact Tamar Shor with questions.
