@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { SEG, GBtn, Btn } from './ui.jsx'
 import { getOrdered } from '../utils/plan.js'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
+import { saveAs } from 'file-saver'
 
 export default function PlanView({ issues, projects, members, plan, getCap, chosenInits, projOrder, orderMap, initId, issueLabels, onBack, onOrder }) {
   const [showAlgo, setShowAlgo] = useState(false)
@@ -111,50 +112,118 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
   const FIXED_W = 520
 
   // ── Download XLSX ──────────────────────────────────────────────────────────
-  const downloadXlsx = () => {
-    const rows = []
+  const downloadXlsx = async () => {
+    const wb = new ExcelJS.Workbook()
+    const ws = wb.addWorksheet('Plan')
 
-    // Header row 1: empty + cycle names
-    const header1 = ['', '', '', '', '']
-    displayCycles.forEach(c => header1.push(cycleLabel(c)))
-    rows.push(header1)
+    const colLetter = (idx) => {
+      let s = '', n = idx
+      while (n >= 0) { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1 }
+      return s
+    }
 
-    // Header row 2: empty + cycle dates
-    const header2 = ['', '', '', '', '']
-    displayCycles.forEach(c => header2.push(cycleDates(c)))
-    rows.push(header2)
+    const totalCols = 6 + numCols // A-E + cycles + Total
+    const memberColIdx = 5 // column E = member
+    const firstCycCol = 6 // column F onwards
+    const totalColIdx = firstCycCol + numCols
 
-    // Member capacity rows
-    mems.forEach(m => {
-      const row = ['', '', '', '', m.name]
-      displayCycles.forEach((_, ci) => {
-        row.push(memberCyclePts[m.id]?.[ci] || '')
-      })
-      rows.push(row)
+    // Styles
+    const darkHeader = { font: { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A2E' } }, alignment: { horizontal: 'center', vertical: 'middle' } }
+    const lightHeader = { font: { bold: true, size: 10 }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F4F0' } }, alignment: { horizontal: 'center' } }
+    const memberStyle = { font: { bold: true, size: 10 }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0EFE9' } } }
+    const memberNumStyle = { font: { bold: true, size: 11 }, alignment: { horizontal: 'center' }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0EFE9' } } }
+    const projHeaderFont = { font: { bold: true, size: 11 } }
+    const cycleNumStyle = { alignment: { horizontal: 'center' }, font: { size: 10 } }
+    const thinBorder = { top: { style: 'thin', color: { argb: 'FFDDDCD5' } }, bottom: { style: 'thin', color: { argb: 'FFDDDCD5' } }, left: { style: 'thin', color: { argb: 'FFDDDCD5' } }, right: { style: 'thin', color: { argb: 'FFDDDCD5' } } }
+
+    // ── Column widths ──
+    ws.getColumn(1).width = 14  // ID
+    ws.getColumn(2).width = 45  // Issue
+    ws.getColumn(3).width = 10  // Estimate
+    ws.getColumn(4).width = 15  // Label
+    ws.getColumn(5).width = 22  // Member
+    for (let c = 0; c < numCols; c++) ws.getColumn(firstCycCol + c).width = 14
+    ws.getColumn(totalColIdx).width = 10
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SECTION 1: Member allocation
+    // ══════════════════════════════════════════════════════════════════════
+
+    // Row 1: Header
+    const allocHeaderRow = ws.addRow(['', '', '', '', 'TEAM MEMBER ALLOCATION', ...displayCycles.map(c => cycleLabel(c)), 'TOTAL'])
+    allocHeaderRow.eachCell((cell, ci) => {
+      if (ci >= memberColIdx) Object.assign(cell, darkHeader)
+      cell.border = thinBorder
+    })
+
+    // Row 2: Dates
+    const dateRow = ws.addRow(['', '', '', '', '', ...displayCycles.map(c => cycleDates(c)), ''])
+    dateRow.eachCell((cell, ci) => {
+      if (ci >= memberColIdx) { cell.font = { size: 8, color: { argb: 'FF9A9A9E' } }; cell.alignment = { horizontal: 'center' } }
+      cell.border = thinBorder
+    })
+
+    // Member rows with SUMIF formulas
+    const memberStartXlRow = ws.rowCount + 1
+    const activeMems = mems.filter(m => Object.keys(memberCyclePts[m.id] || {}).length > 0)
+    activeMems.forEach(m => {
+      const row = ws.addRow(['', '', '', `cap: ${m.cap}pt`, m.name])
+      row.eachCell((cell) => { Object.assign(cell, memberStyle); cell.border = thinBorder })
+      row.getCell(memberColIdx).font = { bold: true, size: 11 }
+      row.getCell(4).font = { size: 8, italic: true, color: { argb: 'FF9A9A9E' } }
+      // Cycle + total cells are placeholders — formulas injected after issue rows
+      for (let c = 0; c < numCols; c++) {
+        const cell = row.getCell(firstCycCol + c)
+        Object.assign(cell, memberNumStyle)
+        cell.border = thinBorder
+      }
+      const totalCell = row.getCell(totalColIdx)
+      Object.assign(totalCell, memberNumStyle)
+      totalCell.border = thinBorder
     })
 
     // Blank separator
-    rows.push([])
+    ws.addRow([])
 
-    // Column headers for issues
-    const issueHeader = ['ID', 'Issue', 'Estimate', 'Label', 'Team Member']
-    displayCycles.forEach(c => issueHeader.push(cycleLabel(c)))
-    rows.push(issueHeader)
+    // ══════════════════════════════════════════════════════════════════════
+    // SECTION 2: Issue data
+    // ══════════════════════════════════════════════════════════════════════
 
-    // Issue rows grouped by initiative > project
+    // Issue column headers
+    const issueHeaderXlRow = ws.rowCount + 1
+    const ihRow = ws.addRow(['ID', 'Issue', 'Estimate', 'Label', 'Team Member', ...displayCycles.map(c => cycleLabel(c)), 'Total'])
+    ihRow.eachCell((cell) => { Object.assign(cell, darkHeader); cell.border = thinBorder })
+
+    const issueDataStartXlRow = ws.rowCount + 1
+
+    // Project color index for alternating project backgrounds
+    let projIdx = 0
+    const projBgColors = ['FFEEF2FF', 'FFECFDF5', 'FFFEFCE8', 'FFFEF2F2', 'FFF5F3FF', 'FFECFEFF', 'FFFFF7ED', 'FFFDF2F8']
+
     initGroups.forEach(({ init, projects: initProjs }) => {
       initProjs.forEach(proj => {
         const projIssues = getOrdered(issues, proj.id, orderMap, initId)
         if (!projIssues.length) return
 
-        // Initiative + Project header row
-        rows.push([`${init.name} >> ${proj.name}`])
+        const bgColor = projBgColors[projIdx % projBgColors.length]
+        const color = projColor[proj.id] || '#3b82f6'
+        const colorArgb = 'FF' + color.replace('#', '')
+        projIdx++
 
-        projIssues.forEach(issue => {
+        // Project header row
+        const phRow = ws.addRow([`${init.name} >> ${proj.name}`, '', '', '', '', ...displayCycles.map(() => ''), ''])
+        ws.mergeCells(phRow.number, 1, phRow.number, totalColIdx)
+        phRow.getCell(1).font = { bold: true, size: 11, color: { argb: colorArgb } }
+        phRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } }
+        phRow.getCell(1).border = thinBorder
+        phRow.eachCell((cell) => { cell.border = thinBorder })
+
+        // Issue rows
+        projIssues.forEach((issue, idx) => {
           const info = issueInfo(issue.id)
           const linearLabel = (issue.labels?.nodes || [])[0]?.name || ''
           const label = issueLabels[issue.id] || linearLabel
-          const row = [
+          const rowData = [
             issue.identifier,
             issue.title,
             issue.estimate || '',
@@ -163,28 +232,140 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
           ]
           displayCycles.forEach((_, ci) => {
             const split = info.splits.find(s => s.ci - startCI === ci)
-            row.push(split ? split.pts : '')
+            rowData.push(split ? split.pts : '')
           })
-          rows.push(row)
+          rowData.push('') // Total placeholder
+
+          const iRow = ws.addRow(rowData)
+
+          // Alternate row shading within project
+          const rowBg = idx % 2 === 0 ? 'FFFFFFFF' : 'FFFAFAF9'
+          iRow.eachCell((cell, ci) => {
+            cell.border = thinBorder
+            cell.font = { size: 10 }
+            if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' }
+          })
+          iRow.getCell(1).font = { size: 9, color: { argb: 'FF9A9A9E' }, name: 'Courier New' }
+          iRow.getCell(3).font = { size: 10, bold: true }
+          iRow.getCell(3).alignment = { horizontal: 'center' }
+
+          // Color cycle cells that have values
+          displayCycles.forEach((_, ci) => {
+            const cell = iRow.getCell(firstCycCol + ci)
+            if (cell.value) {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } }
+              cell.font = { size: 10, bold: true, color: { argb: colorArgb } }
+            }
+          })
+
+          // Total formula
+          const firstCyc = colLetter(firstCycCol - 1)
+          const lastCyc = colLetter(firstCycCol + numCols - 2)
+          iRow.getCell(totalColIdx).value = { formula: `SUM(${firstCyc}${iRow.number}:${lastCyc}${iRow.number})` }
+          iRow.getCell(totalColIdx).font = { size: 10, bold: true }
+          iRow.getCell(totalColIdx).alignment = { horizontal: 'center' }
         })
       })
     })
 
-    const ws = XLSX.utils.aoa_to_sheet(rows)
+    const issueDataEndXlRow = ws.rowCount
 
-    // Set column widths
-    ws['!cols'] = [
-      { wch: 10 }, // ID
-      { wch: 40 }, // Issue
-      { wch: 8 },  // Estimate
-      { wch: 14 }, // Label
-      { wch: 16 }, // Member
-      ...displayCycles.map(() => ({ wch: 12 })),
-    ]
+    // ── Inject SUMIF formulas for member rows ──
+    const memberColLetter = colLetter(memberColIdx - 1)
+    const memberRange = `$${memberColLetter}$${issueDataStartXlRow}:$${memberColLetter}$${issueDataEndXlRow}`
 
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Plan')
-    XLSX.writeFile(wb, 'plan.xlsx')
+    activeMems.forEach((m, mi) => {
+      const xlRow = memberStartXlRow + mi
+      const row = ws.getRow(xlRow)
+      displayCycles.forEach((_, ci) => {
+        const cycCol = colLetter(firstCycCol + ci - 1)
+        const cycRange = `$${cycCol}$${issueDataStartXlRow}:$${cycCol}$${issueDataEndXlRow}`
+        const nameRef = `${memberColLetter}${xlRow}`
+        row.getCell(firstCycCol + ci).value = { formula: `SUMIF(${memberRange},${nameRef},${cycRange})` }
+      })
+      const firstCyc = colLetter(firstCycCol - 1)
+      const lastCyc = colLetter(firstCycCol + numCols - 2)
+      row.getCell(totalColIdx).value = { formula: `SUM(${firstCyc}${xlRow}:${lastCyc}${xlRow})` }
+    })
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SECTION 3: Verification
+    // ══════════════════════════════════════════════════════════════════════
+    ws.addRow([])
+    const verifyTitleRow = ws.addRow(['VERIFICATION'])
+    verifyTitleRow.getCell(1).font = { bold: true, size: 12 }
+
+    const vhRow = ws.addRow(['', '', '', 'Type', 'Member', ...displayCycles.map(c => cycleLabel(c)), 'Total'])
+    vhRow.eachCell((cell) => { Object.assign(cell, lightHeader); cell.border = thinBorder })
+
+    activeMems.forEach((m, mi) => {
+      const memberAllocXlRow = memberStartXlRow + mi
+
+      // Expected row
+      const expRowData = ['', '', '', 'Expected', m.name]
+      let expectedTotal = 0
+      displayCycles.forEach((_, ci) => {
+        const pts = memberCyclePts[m.id]?.[ci] || 0
+        expRowData.push(pts)
+        expectedTotal += pts
+      })
+      expRowData.push(expectedTotal)
+      const expRow = ws.addRow(expRowData)
+      expRow.eachCell((cell, ci) => {
+        cell.border = thinBorder
+        if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' }
+      })
+      expRow.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF9A9A9E' } }
+
+      // Formula row
+      const frmRow = ws.addRow(['', '', '', 'Formula', m.name])
+      displayCycles.forEach((_, ci) => {
+        const cycCol = colLetter(firstCycCol + ci - 1)
+        frmRow.getCell(firstCycCol + ci).value = { formula: `${cycCol}${memberAllocXlRow}` }
+      })
+      const firstCyc = colLetter(firstCycCol - 1)
+      const lastCyc = colLetter(firstCycCol + numCols - 2)
+      frmRow.getCell(totalColIdx).value = { formula: `${colLetter(totalColIdx - 1)}${memberAllocXlRow}` }
+      frmRow.eachCell((cell, ci) => {
+        cell.border = thinBorder
+        if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' }
+      })
+      frmRow.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF9A9A9E' } }
+
+      // Check row — IF match green OK, else red MISMATCH
+      const chkRow = ws.addRow(['', '', '', 'Check', m.name])
+      displayCycles.forEach((_, ci) => {
+        const cycCol = colLetter(firstCycCol + ci - 1)
+        const cell = chkRow.getCell(firstCycCol + ci)
+        cell.value = { formula: `IF(${cycCol}${expRow.number}=${cycCol}${frmRow.number},"OK","MISMATCH")` }
+      })
+      chkRow.getCell(totalColIdx).value = { formula: `IF(${colLetter(totalColIdx - 1)}${expRow.number}=${colLetter(totalColIdx - 1)}${frmRow.number},"OK","MISMATCH")` }
+      chkRow.eachCell((cell, ci) => {
+        cell.border = thinBorder
+        if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' }
+      })
+      chkRow.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF9A9A9E' } }
+
+      // Add conditional formatting for check cells
+      for (let ci = 0; ci <= numCols; ci++) {
+        const col = firstCycCol + ci
+        const cellRef = `${colLetter(col - 1)}${chkRow.number}`
+        ws.addConditionalFormatting({
+          ref: cellRef,
+          rules: [
+            { type: 'containsText', operator: 'containsText', text: 'OK', style: { font: { bold: true, color: { argb: 'FF166534' } }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFDCFCE7' } } }, priority: 1 },
+            { type: 'containsText', operator: 'containsText', text: 'MISMATCH', style: { font: { bold: true, color: { argb: 'FF991B1B' } }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFEE2E2' } } }, priority: 2 },
+          ]
+        })
+      }
+    })
+
+    // ── Freeze panes ──
+    ws.views = [{ state: 'frozen', xSplit: 5, ySplit: issueHeaderXlRow }]
+
+    // ── Write file ──
+    const buf = await wb.xlsx.writeBuffer()
+    saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'plan.xlsx')
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
