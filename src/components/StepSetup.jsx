@@ -676,7 +676,7 @@ export function StepLabelEstimate({ issues, chosenInits, projOrder, projects, or
         fontSize: 11, color: '#92400e', lineHeight: 1.6,
       }}>
         <span style={{ flexShrink: 0, fontSize: 14 }}>&#9432;</span>
-        <span>Changes to labels, estimates, and member assignments on this screen are <strong>for this planning session only</strong> and will not be saved. To make permanent changes, update them directly in Linear.</span>
+        <span>Every issue needs an <strong>estimate</strong> and either a <strong>label</strong> or an <strong>assigned member</strong>. If both are set, the member takes priority. Changes on this screen are <strong>for this planning session only</strong> — update them directly in Linear to make permanent changes.</span>
       </div>
 
       {unestCount > 0 && (
