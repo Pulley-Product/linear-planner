@@ -7,11 +7,64 @@ import StepOrderIssues from './components/StepOrder.jsx'
 import { StepCapacity } from './components/StepEstimatesCapacity.jsx'
 import PlanView from './components/PlanView.jsx'
 
+// ── Password Gate ────────────────────────────────────────────────────────────
+function PasswordGate({ onUnlock }) {
+  const [pw, setPw] = useState('')
+  const [error, setError] = useState('')
+  const [checking, setChecking] = useState(false)
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!pw.trim()) return
+    setChecking(true)
+    setError('')
+    try {
+      const resp = await fetch('/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appPassword: pw.trim() }),
+      })
+      if (resp.ok) {
+        localStorage.setItem('lp-app-password', pw.trim())
+        onUnlock()
+      } else {
+        setError('Wrong password')
+      }
+    } catch {
+      // If /auth 404s (local dev without Vercel), skip the gate
+      localStorage.setItem('lp-app-password', pw.trim())
+      onUnlock()
+    }
+    setChecking(false)
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f4f0' }}>
+      <form onSubmit={submit} style={{ background: 'white', borderRadius: 12, padding: '40px 36px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)', width: 360, textAlign: 'center' }}>
+        <div style={{ width: 40, height: 40, background: '#e63946', borderRadius: 9, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 16, color: 'white', marginBottom: 16 }}>LP</div>
+        <div style={{ fontWeight: 700, fontSize: 16, color: '#1a1a2e', marginBottom: 4 }}>Initiative Planner</div>
+        <div style={{ fontSize: 12, color: '#9a9a9e', marginBottom: 24 }}>Enter the team password to continue</div>
+        <input
+          type="password" value={pw} onChange={e => setPw(e.target.value)}
+          placeholder="Password"
+          autoFocus
+          style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1.5px solid #e0e0e0', fontSize: 14, marginBottom: 12, boxSizing: 'border-box', fontFamily: 'inherit' }}
+        />
+        {error && <div style={{ color: '#e63946', fontSize: 12, marginBottom: 8 }}>{error}</div>}
+        <button type="submit" disabled={checking} style={{ width: '100%', padding: '10px 0', borderRadius: 8, border: 'none', background: '#1a1a2e', color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+          {checking ? 'Checking…' : 'Continue'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
 // Steps: 0=connect 1=team 2=cycle 3=initiatives 4=projects 5=projpriority 6=states
 //        7=label&estimate 8=order 9=labels>members 10=capacity 11=plan
 const STEPS = ['Connect','Team & Members','Start Cycle','Initiatives','Projects','Project Priority','Issue States','Label & Estimate','Order Issues','Labels > Team Members','Capacity','Plan']
 
 export default function App() {
+  const [authed, setAuthed] = useState(() => !!localStorage.getItem('lp-app-password'))
   const [step, setStepRaw] = useState(0)
   const [err, setErr]   = useState('')
   const mainRef = useRef(null)
@@ -381,6 +434,8 @@ export default function App() {
   }) : null
 
   // ── Layout ──────────────────────────────────────────────────────────────────
+  if (!authed) return <PasswordGate onUnlock={() => setAuthed(true)} />
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#f5f4f0', color: '#1a1a2e', fontSize: 14 }}>
 

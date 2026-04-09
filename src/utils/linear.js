@@ -1,16 +1,23 @@
-// All Linear GraphQL calls go through the local proxy (proxy.js)
-// which forwards them to api.linear.app server-side, avoiding CORS.
+// All Linear GraphQL calls go through a proxy to avoid CORS.
+// Local dev: Vite proxies /linear to proxy.js (localhost:3131)
+// Deployed:  Vercel rewrites /linear to /api/linear (serverless function)
 
 const PROXY_URL = '/linear'
 
 export async function linearQuery(apiKey, query, variables = {}) {
+  const appPassword = localStorage.getItem('lp-app-password') || ''
   const resp = await fetch(PROXY_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ apiKey, query, variables }),
+    body: JSON.stringify({ appPassword, apiKey, query, variables }),
   })
 
   if (!resp.ok) {
+    if (resp.status === 401) {
+      localStorage.removeItem('lp-app-password')
+      window.location.reload()
+      throw new Error('Session expired — please re-enter the app password.')
+    }
     const text = await resp.text().catch(() => resp.statusText)
     if (resp.status === 0 || !resp.status) {
       throw new Error('Cannot reach proxy — is it running? Run: npm run proxy')

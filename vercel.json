@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/linear", "destination": "/api/linear" },
+    { "source": "/auth", "destination": "/api/auth" }
+  ]
+}
