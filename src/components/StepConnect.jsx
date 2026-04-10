@@ -99,8 +99,7 @@ export default function StepConnect({ onConnected }) {
 
         <div style={{ marginTop: 16, fontSize: 11, color: '#9a9a9e', fontFamily: 'monospace', lineHeight: 1.8 }}>
           ↳ Get your key: linear.app → Settings → Security & Access → Personal API Keys → New API Key<br />
-          ↳ When creating the key, select <strong>read-only</strong> permissions<br />
-          ↳ Make sure the app is running: <code>npm start</code>
+          ↳ When creating the key, select <strong>read-only</strong> permissions
         </div>
       </Card>
 

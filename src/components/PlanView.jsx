@@ -656,8 +656,14 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
               <tr style={{ background: '#1a1a2e' }}>
-                {['ID', 'Issue', 'Est', 'Label', 'Member'].map(h => (
-                  <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontFamily: 'monospace', fontSize: 9, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
+                {[
+                  { label: 'ID', width: 80 },
+                  { label: 'Issue', width: FIXED_W - 80 - 50 - 100 - 120 },
+                  { label: 'Est', width: 50 },
+                  { label: 'Label', width: 100 },
+                  { label: 'Member', width: 120 },
+                ].map(h => (
+                  <th key={h.label} style={{ width: h.width, padding: '8px 10px', textAlign: 'left', fontFamily: 'monospace', fontSize: 9, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h.label}</th>
                 ))}
                 {displayCycles.map(c => (
                   <th key={c.id} style={{ width: COL_W, padding: '6px 8px', textAlign: 'center', color: 'white', fontFamily: 'monospace', fontSize: 10, fontWeight: 700, borderLeft: '1px solid rgba(255,255,255,0.1)' }}>
