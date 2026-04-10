@@ -597,7 +597,7 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
         <div style={{ minWidth: FIXED_W + COL_W * numCols }}>
 
           {/* Per-member allocation table */}
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 16 }}>
+          <table style={{ width: FIXED_W + COL_W * numCols, tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 12, marginBottom: 16 }}>
             <thead>
               <tr style={{ background: '#1a1a2e', borderRadius: '10px 10px 0 0' }}>
                 <th style={{ width: FIXED_W, padding: '8px 10px', textAlign: 'left', fontFamily: 'monospace', fontSize: 9, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Team Member</th>
@@ -653,7 +653,7 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
           </div>
 
           {/* Issue spreadsheet table */}
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+          <table style={{ width: FIXED_W + COL_W * numCols, tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
               <tr style={{ background: '#1a1a2e' }}>
                 {[
@@ -699,7 +699,7 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
                       return (
                         <tr key={issue.id} style={{ borderBottom: '1px solid #f0efe9', background: isUnscheduled ? '#fff8f8' : idx % 2 === 0 ? 'white' : '#fafaf9' }}>
                           <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: 10, color: isUnscheduled ? '#e63946' : '#9a9a9e', whiteSpace: 'nowrap' }}>{issue.identifier}</td>
-                          <td style={{ padding: '5px 10px', fontSize: 12, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{issue.title}</td>
+                          <td style={{ padding: '5px 10px', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{issue.title}</td>
                           <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: 11, textAlign: 'center', fontWeight: 600 }}>{issue.estimate || '–'}</td>
                           <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: 10, color: '#5a5a72' }}>{label}</td>
                           <td style={{ padding: '5px 10px', fontSize: 11, color: '#5a5a72', whiteSpace: 'nowrap' }}>{info.member?.name || '–'}</td>
