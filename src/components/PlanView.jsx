@@ -409,6 +409,10 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
       <h1 style={{ fontWeight: 800, fontSize: 26, letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 6 }}>
         Forward <span style={{ color: '#e63946' }}>Plan</span>
       </h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 20, marginBottom: 20 }}>
+        <GBtn onClick={onBack}>&#8592; Back</GBtn>
+        <Btn onClick={downloadXlsx}>Download .xlsx</Btn>
+      </div>
       {/* Algorithm explanation — collapsible */}
       <div style={{ marginBottom: 16 }}>
         <div onClick={() => setShowAlgo(!showAlgo)} style={{
@@ -429,7 +433,7 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
 
             <div style={{ fontWeight: 600, color: '#1a1a2e', marginBottom: 4 }}>First: lock in what's already committed</div>
             <p style={{ margin: '0 0 12px', lineHeight: 1.8 }}>
-              Before scheduling any new work, the planner looks at all issues that are already assigned to a cycle in Linear — things like PTO, on-call shifts, holidays, and in-progress work. These are placed first (shown with diagonal stripes in the table below). This blocks out each person's capacity so the planner knows what time is actually available. Any issues committed to cycles before your selected start cycle are ignored.
+              Before scheduling any new work, the planner looks at all issues that are already assigned to a cycle in Linear — things like PTO, on-call shifts, holidays, and in-progress work. These are placed first, blocking out each person's capacity so the planner knows what time is actually available. Any issues committed to cycles before your selected start cycle are ignored.
             </p>
 
             <div style={{ fontWeight: 600, color: '#1a1a2e', marginBottom: 4 }}>Then: schedule everything else</div>
@@ -565,9 +569,8 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
         </table>
       </div>
 
-      {/* Combined scrollable area — flipped so scrollbar appears at top */}
-      <div style={{ overflowX: 'auto', marginBottom: 20, transform: 'rotateX(180deg)' }}>
-        <div style={{ transform: 'rotateX(180deg)' }}>
+      {/* Combined scrollable area */}
+      <div style={{ overflowX: 'auto', marginBottom: 20 }}>
         <div style={{ minWidth: FIXED_W + COL_W * numCols }}>
 
           {/* Per-member allocation table */}
@@ -689,11 +692,10 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
           </table>
         </div>
       </div>
-      </div>
 
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 20 }}>
-        <GBtn onClick={onBack}>← Capacity</GBtn>
+        <GBtn onClick={onBack}>&#8592; Back</GBtn>
         <Btn onClick={downloadXlsx}>Download .xlsx</Btn>
       </div>
     </div>

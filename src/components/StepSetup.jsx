@@ -16,7 +16,7 @@ export function StepTeam({ allTeams, selTeamId, setSelTeamId, selMemberIds, setS
 
   return (
     <div>
-      <H1>Pick a Team & Select <R>Members</R></H1>
+      <H1>Pick a <R>Team</R> & Select <R>Members</R></H1>
       <Sub>Select the team whose members and cycles will be used for this plan. Uncheck members who should not be assigned issues.</Sub>
       <Row>
         <GBtn onClick={onBack}>← Back</GBtn>
