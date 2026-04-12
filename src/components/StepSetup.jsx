@@ -444,11 +444,11 @@ export function StepLabelMap({ labels, members, labelMap, issues, toggleLabelMem
   const usedLabels = labels.filter(l => issues.some(i => (i.labels?.nodes || []).some(ll => ll.name === l)))
   const unusedLabels = labels.filter(l => !usedLabels.includes(l))
 
-  const MW = 60 // member column width
+  const MW = 90 // member column width
 
   const renderLabelGrid = (labelList) => (
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table style={{ width: 170 + MW * members.length, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
             <th style={{ width: 170, padding: '8px 0', textAlign: 'left', fontSize: 10, color: '#9a9a9e', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: '1px solid #dddcd5' }}>Label</th>
@@ -473,25 +473,25 @@ export function StepLabelMap({ labels, members, labelMap, issues, toggleLabelMem
             const col = issues.flatMap(i => i.labels?.nodes || []).find(l => l.name === label)?.color
             return (
               <tr key={label} style={{ borderBottom: '1px solid #f0efe9' }}>
-                <td style={{ padding: '7px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: col ? `#${col}` : '#9a9a9e', flexShrink: 0, display: 'inline-block' }} />
-                  <span style={{ fontWeight: 500, fontSize: 13 }}>{label}</span>
-                  <span style={{ fontSize: 10, color: '#9a9a9e', fontFamily: 'monospace' }}>{cnt}i</span>
+                <td style={{ padding: '7px 0' }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: col ? `#${col}` : '#9a9a9e', display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }} />
+                  <span style={{ fontWeight: 500, fontSize: 13, verticalAlign: 'middle' }}>{label}</span>
+                  <span style={{ fontSize: 10, color: '#9a9a9e', fontFamily: 'monospace', verticalAlign: 'middle', marginLeft: 6 }}>{cnt}i</span>
                 </td>
                 {members.map((m, mi) => {
                   const checked = (labelMap[label] || []).includes(m.id)
                   return (
-                    <td key={m.id} style={{ width: MW, textAlign: 'center', padding: '3px 0' }}>
+                    <td key={m.id} style={{ width: MW, textAlign: 'center', verticalAlign: 'middle', padding: '3px 0' }}>
                       <div onClick={() => toggleLabelMember(label, m.id)}
                         style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                         <div style={{
-                          width: 17, height: 17, borderRadius: 4,
+                          width: 17, height: 17, borderRadius: 4, boxSizing: 'border-box',
                           border: `2px solid ${checked ? AV_FG[mi % AV_FG.length] : '#dddcd5'}`,
                           background: checked ? AV_BG[mi % AV_BG.length] : 'white',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 10, color: AV_FG[mi % AV_FG.length], transition: 'all 0.12s',
+                          fontSize: 10, lineHeight: 1, color: AV_FG[mi % AV_FG.length], transition: 'all 0.12s',
                         }}>
-                          {checked ? '✓' : ''}
+                          {checked ? '✓' : '\u00A0'}
                         </div>
                       </div>
                     </td>
@@ -656,11 +656,20 @@ export function StepProjOrder({ projects, issues, chosenInits, projOrder, setPro
                     ))}
                   </div>
                 </div>
-                <div onMouseDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); setModalProjId(proj.id) }}
-                  style={{ flexShrink: 0, cursor: 'pointer', textAlign: 'right', maxWidth: 180 }}>
-                  <div style={{ fontSize: 9, fontFamily: 'monospace', color: deps.length ? '#e63946' : '#c8c7be', whiteSpace: 'nowrap' }}>depends on completion of</div>
-                  <div style={{ fontSize: 10, fontFamily: 'monospace', marginTop: 1, color: deps.length ? '#1a1a2e' : '#c8c7be', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{deps.length ? depNames.join(', ') : 'none'}</div>
-                </div>
+                <button type="button"
+                  onMouseDown={e => e.stopPropagation()}
+                  onDragStart={e => { e.preventDefault(); e.stopPropagation() }}
+                  draggable={false}
+                  onClick={e => { e.stopPropagation(); setModalProjId(proj.id) }}
+                  style={{
+                    ...inpS, padding: '3px 8px', fontSize: 10, fontFamily: 'monospace', flexShrink: 0,
+                    cursor: 'pointer', whiteSpace: 'nowrap', width: 70, textAlign: 'center',
+                    background: deps.length ? 'rgba(45,106,79,0.08)' : '#f9f9f7',
+                    borderColor: deps.length ? 'rgba(45,106,79,0.3)' : '#dddcd5',
+                    color: deps.length ? '#2d6a4f' : '#9a9a9e',
+                  }}>
+                  {deps.length ? `${deps.length} dep${deps.length > 1 ? 's' : ''}` : 'no deps'}
+                </button>
                 <div style={{ color: '#c8c7be', fontSize: 14, cursor: 'grab', padding: '0 4px' }}>⠿</div>
               </div>
               {showAfter && <div style={{ height: 3, background: '#e63946', borderRadius: 2, margin: '4px 0' }} />}
@@ -678,8 +687,7 @@ export function StepProjOrder({ projects, issues, chosenInits, projOrder, setPro
         <div onClick={() => setModalProjId(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(26,26,46,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div onClick={e => e.stopPropagation()} style={{ background: 'white', borderRadius: 12, padding: 24, width: 420, maxHeight: '70vh', overflowY: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,0.2)', border: '1px solid #e8e7e3' }}>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Depends on completion of</div>
-            <div style={{ fontSize: 11, color: '#9a9a9e', fontFamily: 'monospace', marginBottom: 4 }}>{fullName(modalProjId)}</div>
-            <div style={{ fontSize: 11, color: '#9a9a9e', marginBottom: 16 }}>Select projects that must finish before this one can start.</div>
+            <div style={{ fontSize: 11, color: '#9a9a9e', marginBottom: 16 }}>Select projects that must finish before <strong>{fullName(modalProjId)}</strong> can start.</div>
             {modalOthers.map(op => {
               const checked = modalDeps.includes(op.id)
               const circular = !checked && wouldCreateCycle(modalProjId, op.id)

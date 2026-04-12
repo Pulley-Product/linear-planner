@@ -60,6 +60,7 @@ export default function StepConnect({ onConnected, autoConnect }) {
       allIssueNodes.forEach(i => { if (i.project?.id) issueProj[i.id] = i.project.id })
 
       const linearDeps = {}
+      const linearRelationIds = {} // "blockedId::blockerId" -> relationId (for delete)
       const crossProjectDeps = [] // [{ issue, dep }] — for warning display
       allIssueNodes.forEach(issue => {
         (issue.relations?.nodes || []).forEach(rel => {
@@ -72,6 +73,9 @@ export default function StepConnect({ onConnected, autoConnect }) {
           } else if (rel.type === 'is blocked by') {
             fromId = rid; toId = issue.id
           } else return
+
+          // Store the relation ID for potential deletion
+          linearRelationIds[`${toId}::${fromId}`] = rel.id
 
           // Check if cross-project
           if (issueProj[fromId] && issueProj[toId] && issueProj[fromId] !== issueProj[toId]) {
@@ -95,6 +99,7 @@ export default function StepConnect({ onConnected, autoConnect }) {
         allTeams: d1.teams.nodes,
         rawIssues: d2.issues.nodes,
         linearDeps,
+        linearRelationIds,
         crossProjectDeps,
       })
     } catch (e) {

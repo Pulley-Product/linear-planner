@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Btn, GBtn, Check, Row, H1, R, Sub, Err, Card, inpS } from './ui.jsx'
 import { getOrdered } from '../utils/plan.js'
-import { linearQuery, buildIssueUpdateMutation } from '../utils/linear.js'
+import { linearQuery, buildIssueUpdateMutation, buildRelationCreateMutation, buildRelationDeleteMutation } from '../utils/linear.js'
 
 // Small "was:" indicator for changed fields
 function Was({ text }) {
@@ -11,7 +11,7 @@ function Was({ text }) {
 
 // ── Issue Row (combined: drag, estimate, label, assignment, deps) ────────────
 function IssueRow({
-  issue, idx, displayLabel, isDragging, issueLabels, setIssueLabel, availableLabels,
+  issue, idx, displayLabel, isDragging, isExcluded, issueLabels, setIssueLabel, availableLabels,
   setEst, setTitle, members, getAssign, setAssign, cycles, setCycle,
   deps, linearDepsSet, onOpenDepModal, trackEdit, issueEdits,
   isSelected, onToggleSelect,
@@ -36,7 +36,8 @@ function IssueRow({
     setEditingEst(false)
   }
 
-  const startTitle = () => { setEditingTitle(true); setTitleVal(issue.title) }
+  const titleInputRef = useRef(null)
+  const startTitle = () => { setEditingTitle(true); setTitleVal(issue.title); setTimeout(() => { if (titleInputRef.current) { titleInputRef.current.setSelectionRange(0, 0); titleInputRef.current.scrollLeft = 0 } }, 0) }
   const commitTitle = () => {
     const val = titleVal.trim()
     if (val && val !== issue.title) {
@@ -54,7 +55,9 @@ function IssueRow({
 
   const handleAssignChange = (e) => {
     const val = e.target.value
-    trackEdit(issue.id, 'assignee', issueEdits?.assignee?.original ?? issue.assignee?.id ?? null, val === '__auto__' ? null : val)
+    const origId = issueEdits?.assignee?.original ?? issue.assignee?.id ?? null
+    const origName = issueEdits?.assignee?.originalName ?? issue.assignee?.name ?? null
+    trackEdit(issue.id, 'assignee', origId, val === '__auto__' ? null : val, { originalName: origName })
     setAssign(issue.id, val === '__auto__' ? '__auto__' : val)
   }
 
@@ -80,8 +83,7 @@ function IssueRow({
   const wasAssignee = issueEdits?.assignee ? (() => {
     const origId = issueEdits.assignee.original
     if (!origId) return '—'
-    const m = members.find(m => m.id === origId)
-    return m?.name || 'unknown'
+    return issueEdits.assignee.originalName || members.find(m => m.id === origId)?.name || '—'
   })() : null
 
   // Consistent control styling
@@ -96,23 +98,23 @@ function IssueRow({
     <div
       style={{
         display: 'flex', alignItems: 'flex-start', gap: 7,
-        background: 'white',
-        border: '1.5px solid #e8e7e3',
+        background: isExcluded ? '#f5f4f0' : 'white',
+        border: `1.5px solid ${isExcluded ? '#e8e7e3' : '#e8e7e3'}`,
         borderRadius: 8, padding: '7px 10px',
         userSelect: 'none',
-        opacity: isDragging ? 0.4 : 1,
+        opacity: isDragging ? 0.4 : isExcluded ? 0.45 : 1,
         transition: 'opacity 0.15s',
       }}
     >
-      {/* Select checkbox */}
+      {/* Select checkbox — clicking restores if excluded */}
       <span
         onMouseDown={e => e.stopPropagation()}
         onDragStart={e => { e.preventDefault(); e.stopPropagation() }}
         draggable={false}
         onClick={e => { e.stopPropagation(); onToggleSelect() }}
-        style={{ flexShrink: 0, cursor: 'pointer', marginTop: 2 }}
+        style={{ flexShrink: 0, cursor: 'pointer', marginTop: 2, pointerEvents: 'auto' }}
       >
-        <Check checked={isSelected} />
+        <Check checked={isExcluded ? false : isSelected} />
       </span>
 
       {/* Drag handle */}
@@ -127,9 +129,21 @@ function IssueRow({
       </span>
 
       {/* Title — click to edit */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flexShrink: 0, width: 200, position: 'relative' }}
+        onMouseEnter={e => {
+          const el = e.currentTarget.querySelector('[data-title-text]')
+          if (el && el.scrollWidth > el.clientWidth) {
+            const tip = e.currentTarget.querySelector('[data-tooltip]')
+            if (tip) tip.style.display = 'block'
+          }
+        }}
+        onMouseLeave={e => {
+          const tip = e.currentTarget.querySelector('[data-tooltip]')
+          if (tip) tip.style.display = 'none'
+        }}
+      >
         {editingTitle ? (
-          <input autoFocus value={titleVal}
+          <input ref={titleInputRef} autoFocus value={titleVal}
             onChange={e => setTitleVal(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') commitTitle(); if (e.key === 'Escape') setEditingTitle(false) }}
             onBlur={commitTitle}
@@ -137,10 +151,19 @@ function IssueRow({
             draggable={false}
             style={{ ...ctrlStyle(true, false), width: '100%', fontSize: 11 }} />
         ) : (
-          <div title={issue.title} onClick={startTitle}
-            style={{ ...ctrlStyle(true, false), fontSize: 11, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', cursor: 'text' }}>
-            {issue.title}
-          </div>
+          <>
+            <div data-title-text onClick={startTitle}
+              style={{ ...ctrlStyle(true, false), fontSize: 11, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', cursor: 'text' }}>
+              {issue.title}
+            </div>
+            <div data-tooltip style={{
+              display: 'none', position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 100,
+              background: '#1a1a2e', color: 'white', fontSize: 11, padding: '6px 10px', borderRadius: 6,
+              whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: 350, boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            }}>
+              {issue.title}
+            </div>
+          </>
         )}
         {wasTitle && <Was text={wasTitle} />}
       </div>
@@ -149,7 +172,7 @@ function IssueRow({
       <div style={{ flexShrink: 0 }}>
         <select value={issue.cycle?.id || ''} onChange={handleCycleChange}
           onMouseDown={e => e.stopPropagation()} draggable={false}
-          style={{ ...ctrlStyle(hasCycle, false), width: 70 }}>
+          style={{ ...ctrlStyle(hasCycle, false), width: 60 }}>
           <option value=''>auto</option>
           {(() => {
             const seen = new Set()
@@ -174,7 +197,7 @@ function IssueRow({
       <div style={{ flexShrink: 0 }}>
         <select value={issueLabels[issue.id] || ''} onChange={handleLabelChange}
           onMouseDown={e => e.stopPropagation()} draggable={false}
-          style={{ ...ctrlStyle(hasLabel, !hasLabelOrAssignment), width: 110 }}>
+          style={{ ...ctrlStyle(hasLabel, !hasLabelOrAssignment), width: 90 }}>
           {linearLabel && !issueLabels[issue.id]
             ? <option value=''>{linearLabel}</option>
             : <option value=''>{linearLabel ? linearLabel + ' (orig)' : 'no label'}</option>
@@ -188,7 +211,7 @@ function IssueRow({
       <div style={{ flexShrink: 0 }}>
         <select value={getAssign(issue.id) || issue.assignee?.id || '__auto__'} onChange={handleAssignChange}
           onMouseDown={e => e.stopPropagation()} draggable={false}
-          style={{ ...ctrlStyle(hasAssignment && !assigneeNotOnTeam, !hasLabelOrAssignment || assigneeNotOnTeam), width: 110 }}>
+          style={{ ...ctrlStyle(hasAssignment && !assigneeNotOnTeam, !hasLabelOrAssignment || assigneeNotOnTeam), width: 90 }}>
           <option value='__auto__'>auto</option>
           {issue.assignee?.id && !members.some(m => m.id === issue.assignee.id) && (
             <option value={issue.assignee.id}>{issue.assignee.name}</option>
@@ -206,10 +229,10 @@ function IssueRow({
             onKeyDown={e => { if (e.key === 'Enter') commitEst(); if (e.key === 'Escape') setEditingEst(false) }}
             onBlur={commitEst}
             onMouseDown={e => e.stopPropagation()} draggable={false}
-            style={{ ...ctrlStyle(true, false), width: 50, textAlign: 'center' }} />
+            style={{ ...ctrlStyle(true, false), width: 45, textAlign: 'center' }} />
         ) : (
           <span onClick={startEst} title='Click to edit estimate'
-            style={{ ...ctrlStyle(hasEst, !hasEst), width: 50, textAlign: 'center', cursor: 'pointer', display: 'inline-block' }}>
+            style={{ ...ctrlStyle(hasEst, !hasEst), width: 45, textAlign: 'center', cursor: 'pointer', display: 'inline-block' }}>
             {hasEst ? `${issue.estimate}pt` : '? pt'}
           </span>
         )}
@@ -224,7 +247,7 @@ function IssueRow({
           onDragStart={e => { e.preventDefault(); e.stopPropagation() }}
           draggable={false}
           onClick={e => { e.stopPropagation(); e.preventDefault(); onOpenDepModal(issue.id) }}
-          style={{ ...ctrlStyle(deps.length > 0, false), width: 65, textAlign: 'center', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          style={{ ...ctrlStyle(deps.length > 0, false), width: 55, textAlign: 'center', cursor: 'pointer', whiteSpace: 'nowrap' }}>
           {deps.length
             ? `${deps.length} dep${deps.length > 1 ? 's' : ''}`
             : 'no deps'}
@@ -236,7 +259,7 @@ function IssueRow({
 
 // ── Project Block (collapsible, with drag-order + dep modal) ─────────────────
 function ProjectBlock({
-  proj, pi, initName, issues, orderMap, initId, issueLabels, setIssueLabel,
+  proj, pi, initName, issues, excludedIssues, orderMap, initId, issueLabels, setIssueLabel,
   availableLabels, setEst, setTitle, members, getAssign, setAssign, cycles, setCycle,
   issueDeps, linearDepsSet, setIssueDepsFor, saveOrder, startIso, trackEdit, edits,
   selected, toggleSelect, expandAll,
@@ -414,6 +437,7 @@ function ProjectBlock({
                 const deps = issueDeps[issue.id] || []
                 const isChild = indent > 0
                 const children = childrenOf[issue.id] || []
+                const isExcluded = excludedIssues.has(issue.id)
                 return (
                   <div key={issue.id}>
                     {showLine(ordIdx) && <div style={{ height: 3, background: '#e63946', borderRadius: 2, margin: '2px 0', marginLeft: indent }} />}
@@ -427,15 +451,15 @@ function ProjectBlock({
                       )}
                       <div
                         data-issue-row
-                        draggable
-                        onDragStart={e => handleDragStart(e, ordIdx)}
+                        draggable={!isExcluded}
+                        onDragStart={e => !isExcluded && handleDragStart(e, ordIdx)}
                         onDragOver={e => handleDragOver(e, ordIdx)}
                         onDragEnd={handleDragEnd}
-                        style={{ marginBottom: 4, cursor: 'grab', flex: 1 }}
+                        style={{ marginBottom: 4, cursor: isExcluded ? 'default' : 'grab', flex: 1 }}
                       >
                         <IssueRow
                           issue={issue} idx={ordIdx} displayLabel={displayLabel}
-                          isDragging={draggingIdx === ordIdx}
+                          isDragging={draggingIdx === ordIdx} isExcluded={isExcluded}
                           issueLabels={issueLabels} setIssueLabel={setIssueLabel}
                           availableLabels={availableLabels}
                           setEst={setEst} setTitle={setTitle} members={members}
@@ -535,7 +559,7 @@ function ProjectBlock({
 
 // ── Initiative Section (collapsible) ─────────────────────────────────────────
 function InitiativeSection({
-  init, projects, projOrder, issues, orderMap, initId,
+  init, projects, projOrder, issues, excludedIssues, orderMap, initId,
   issueLabels, setIssueLabel, availableLabels,
   setEst, setTitle, members, getAssign, setAssign, cycles, setCycle,
   issueDeps, linearDepsSet, setIssueDepsFor, saveOrder, startIso, trackEdit, edits,
@@ -582,7 +606,7 @@ function InitiativeSection({
           {orderedProjs.map((proj, pi) => (
             <ProjectBlock key={proj.id}
               proj={proj} pi={pi} initName={init.name}
-              issues={issues} orderMap={orderMap} initId={initId}
+              issues={issues} excludedIssues={excludedIssues} orderMap={orderMap} initId={initId}
               issueLabels={issueLabels} setIssueLabel={setIssueLabel}
               availableLabels={availableLabels}
               setEst={setEst} setTitle={setTitle} members={members}
@@ -610,6 +634,7 @@ export default function StepConfigureIssues({
   issueDeps, linearDepsSet, crossProjectDeps, setIssueDepsFor,
   saveOrder, startIso, trackEdit,
   edits, setEdits, apiKey,
+  linearRelationIds,
   excludedIssues, setExcludedIssues,
   err, onNext, onBack,
 }) {
@@ -624,7 +649,27 @@ export default function StepConfigureIssues({
   const relevantCrossProjectDeps = (crossProjectDeps || []).filter(d => issueIds.has(d.blocker.id) || issueIds.has(d.blocked.id))
   const memberIds = new Set(members.map(m => m.id))
 
+  // Error counts
+  const missingEst = activeIssues.filter(i => !i.estimate || i.estimate <= 0)
+  const missingLabelOrAssign = activeIssues.filter(i => {
+    const hasLabel = (i.labels?.nodes || []).length > 0 || !!issueLabels[i.id]
+    const assignVal = getAssign(i.id)
+    const hasAssignment = (assignVal && assignVal !== '__auto__') || (!assignVal && !!i.assignee?.id)
+    return !hasLabel && !hasAssignment
+  })
+  const offTeamAssign = activeIssues.filter(i => {
+    const assignVal = getAssign(i.id)
+    return !assignVal && i.assignee?.id && !memberIds.has(i.assignee.id)
+  })
+  const totalErrors = missingEst.length + missingLabelOrAssign.length + offTeamAssign.length
+  const [showErrors, setShowErrors] = useState(false)
+
   const toggleSelect = (id) => {
+    // If excluded, restore it instead of selecting
+    if (excludedIssues.has(id)) {
+      restoreIssue(id)
+      return
+    }
     const next = new Set(selected)
     next.has(id) ? next.delete(id) : next.add(id)
     setSelected(next)
@@ -647,16 +692,41 @@ export default function StepConfigureIssues({
     setExcludedIssues(new Set())
   }
 
+  // ── Dep diffs ──
+  const depAdded = [] // [{ blockedId, blockerId }]
+  const depRemoved = [] // [{ blockedId, blockerId, relationId }]
+  Object.entries(issueDeps).forEach(([blockedId, blockerIds]) => {
+    const origSet = linearDepsSet[blockedId]
+    blockerIds.forEach(blockerId => {
+      if (!origSet?.has(blockerId)) {
+        depAdded.push({ blockedId, blockerId })
+      }
+    })
+  })
+  Object.entries(linearDepsSet).forEach(([blockedId, origBlockers]) => {
+    const currentDeps = new Set(issueDeps[blockedId] || [])
+    origBlockers.forEach(blockerId => {
+      if (!currentDeps.has(blockerId)) {
+        const relationId = linearRelationIds[`${blockedId}::${blockerId}`]
+        if (relationId) depRemoved.push({ blockedId, blockerId, relationId })
+      }
+    })
+  })
+  const depChangeCount = depAdded.length + depRemoved.length
+
   // ── Save to Linear ──
   const editCount = Object.values(edits).reduce((sum, e) => sum + Object.keys(e).length, 0)
+  const totalChangeCount = editCount + depChangeCount
   const [saving, setSaving] = useState(false)
-  const [saveResult, setSaveResult] = useState(null) // { ok: N, failed: N } or null
+  const [saveResult, setSaveResult] = useState(null)
 
   const saveToLinear = async () => {
     setSaving(true)
     setSaveResult(null)
     let ok = 0, failed = 0
     const errors = []
+
+    // Save field edits
     for (const [issueId, fields] of Object.entries(edits)) {
       const issue = issues.find(i => i.id === issueId)
       const label = issue?.identifier || issueId
@@ -675,6 +745,35 @@ export default function StepConfigureIssues({
         failed++
       }
     }
+
+    // Create new dep relations
+    for (const { blockedId, blockerId } of depAdded) {
+      const issue = issues.find(i => i.id === blockedId)
+      const label = issue?.identifier || blockedId
+      try {
+        await linearQuery(apiKey, buildRelationCreateMutation(), {
+          issueId: blockerId, relatedIssueId: blockedId, type: 'blocks',
+        })
+        ok++
+      } catch (e) {
+        errors.push(`${label} dep: ${e.message}`)
+        failed++
+      }
+    }
+
+    // Delete removed dep relations
+    for (const { blockedId, relationId } of depRemoved) {
+      const issue = issues.find(i => i.id === blockedId)
+      const label = issue?.identifier || blockedId
+      try {
+        await linearQuery(apiKey, buildRelationDeleteMutation(), { id: relationId })
+        ok++
+      } catch (e) {
+        errors.push(`${label} dep remove: ${e.message}`)
+        failed++
+      }
+    }
+
     setSaving(false)
     setSaveResult({ ok, failed, errors })
     if (failed === 0) setEdits({})
@@ -685,30 +784,14 @@ export default function StepConfigureIssues({
       <H1>Configure <R>Issues</R></H1>
       <Sub>Set estimates, labels, assignments, order, and dependencies for all issues. Drag to reorder within each project. Click a title to edit it (e.g. add [N] prefixes).</Sub>
 
-      {/* Excluded issues banner */}
+      {/* Excluded issues count */}
       {excludedList.length > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', marginBottom: 14,
           background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, fontSize: 11,
         }}>
-          <span style={{ color: '#92400e' }}>{excludedList.length} issue{excludedList.length !== 1 ? 's' : ''} removed from plan</span>
-          <span onClick={() => setShowExcluded(p => !p)} style={{ color: '#1d4ed8', cursor: 'pointer', fontFamily: 'monospace' }}>
-            {showExcluded ? 'hide' : 'show'}
-          </span>
+          <span style={{ color: '#92400e' }}>{excludedList.length} issue{excludedList.length !== 1 ? 's' : ''} excluded from plan (greyed out below)</span>
           <span onClick={restoreAll} style={{ color: '#1d4ed8', cursor: 'pointer', fontFamily: 'monospace' }}>restore all</span>
-        </div>
-      )}
-
-      {/* Excluded issues list */}
-      {showExcluded && excludedList.length > 0 && (
-        <div style={{ marginBottom: 14, padding: '10px 14px', background: '#fafaf9', border: '1px solid #e8e7e3', borderRadius: 8 }}>
-          {excludedList.map(issue => (
-            <div key={issue.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 11 }}>
-              <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e' }}>{issue.identifier}</span>
-              <span style={{ flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', color: '#9a9a9e' }}>{issue.title}</span>
-              <span onClick={() => restoreIssue(issue.id)} style={{ color: '#1d4ed8', cursor: 'pointer', fontFamily: 'monospace', fontSize: 10, flexShrink: 0 }}>restore</span>
-            </div>
-          ))}
         </div>
       )}
 
@@ -735,32 +818,79 @@ export default function StepConfigureIssues({
         </div>
       )}
 
+      {/* Issue errors summary */}
+      {totalErrors > 0 && (
+        <div style={{
+          background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8,
+          padding: '8px 14px', marginBottom: 14, fontSize: 11, color: '#991b1b',
+        }}>
+          <div onClick={() => setShowErrors(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
+            <span style={{ fontSize: 8, transition: 'transform 0.15s', transform: showErrors ? 'rotate(0deg)' : 'rotate(-90deg)' }}>&#9660;</span>
+            <span style={{ fontWeight: 700 }}>{totalErrors} issue{totalErrors !== 1 ? 's' : ''} need attention</span>
+          </div>
+          {showErrors && (
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {(() => {
+                const truncTitle = (t) => t.length > 40 ? t.slice(0, 40) + '...' : t
+                const issueLine = (i, extra) => (
+                  <div key={i.id} style={{ fontFamily: 'monospace', fontSize: 10, padding: '1px 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {i.identifier} — {truncTitle(i.title)}{extra || ''}
+                  </div>
+                )
+                return <>
+                  {missingEst.length > 0 && (
+                    <div>
+                      <div style={{ fontWeight: 600, marginBottom: 2 }}>{missingEst.length} missing estimate{missingEst.length !== 1 ? 's' : ''}</div>
+                      {missingEst.map(i => issueLine(i))}
+                    </div>
+                  )}
+                  {missingLabelOrAssign.length > 0 && (
+                    <div>
+                      <div style={{ fontWeight: 600, marginBottom: 2 }}>{missingLabelOrAssign.length} missing label or assignment</div>
+                      {missingLabelOrAssign.map(i => issueLine(i))}
+                    </div>
+                  )}
+                  {offTeamAssign.length > 0 && (
+                    <div>
+                      <div style={{ fontWeight: 600, marginBottom: 2 }}>{offTeamAssign.length} assigned to people outside selected team</div>
+                      {offTeamAssign.map(i => issueLine(i, ` — ${i.assignee?.name}`))}
+                    </div>
+                  )}
+                </>
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
       {err && <Err>{err}</Err>}
 
       {/* Save to Linear */}
-      {editCount > 0 && (
+      {totalChangeCount > 0 && (
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', marginBottom: 14,
-          background: 'rgba(26,26,46,0.04)', border: '1.5px solid #1a1a2e', borderRadius: 8,
+          background: '#dbeafe', border: '1px solid #93c5fd', borderRadius: 8,
+          padding: '8px 14px', marginBottom: 14, fontSize: 11, color: '#1e40af',
         }}>
-          <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#1a1a2e', flex: 1 }}>
-            {editCount} unsaved change{editCount !== 1 ? 's' : ''}
-          </span>
-          <Btn onClick={saveToLinear} disabled={saving}>
-            {saving ? 'Saving...' : `Save ${editCount} change${editCount !== 1 ? 's' : ''} to Linear`}
-          </Btn>
-        </div>
-      )}
-      {saveResult && (
-        <div style={{
-          padding: '8px 14px', marginBottom: 14, borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-          background: saveResult.failed ? '#fef2f2' : '#f0fdf4',
-          border: saveResult.failed ? '1px solid #fecaca' : '1px solid #bbf7d0',
-          color: saveResult.failed ? '#991b1b' : '#166534',
-        }}>
-          {saveResult.failed
-            ? <>{saveResult.ok} saved, {saveResult.failed} failed:{saveResult.errors?.map((err, i) => <div key={i} style={{ marginTop: 4 }}>{err}</div>)}</>
-            : `${saveResult.ok} issue${saveResult.ok !== 1 ? 's' : ''} updated in Linear`}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontWeight: 700, flex: 1 }}>
+              {totalChangeCount} change{totalChangeCount !== 1 ? 's' : ''} from Linear data
+              {depChangeCount > 0 ? ` (${depAdded.length} dep${depAdded.length !== 1 ? 's' : ''} added, ${depRemoved.length} removed)` : ''}
+            </span>
+            <Btn onClick={saveToLinear} disabled={saving}>
+              {saving ? 'Saving...' : 'Save to Linear'}
+            </Btn>
+          </div>
+          {saveResult && (
+            <div style={{
+              marginTop: 6, padding: '6px 10px', borderRadius: 6, fontFamily: 'monospace',
+              background: saveResult.failed ? '#fef2f2' : '#f0fdf4',
+              color: saveResult.failed ? '#991b1b' : '#166534',
+            }}>
+              {saveResult.failed
+                ? <>{saveResult.ok} saved, {saveResult.failed} failed:{saveResult.errors?.map((err, i) => <div key={i} style={{ marginTop: 4 }}>{err}</div>)}</>
+                : `${saveResult.ok} issue${saveResult.ok !== 1 ? 's' : ''} updated in Linear`}
+            </div>
+          )}
         </div>
       )}
 
@@ -771,7 +901,7 @@ export default function StepConfigureIssues({
           background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8,
         }}>
           <span style={{ fontSize: 12, color: '#991b1b', fontFamily: 'monospace' }}>{selected.size} selected</span>
-          <GBtn sm onClick={removeSelected}>Remove from plan</GBtn>
+          <GBtn sm onClick={removeSelected}>Exclude from plan</GBtn>
           <GBtn sm onClick={() => setSelected(new Set())}>Cancel</GBtn>
         </div>
       )}
@@ -793,7 +923,7 @@ export default function StepConfigureIssues({
       }).map(init => (
         <InitiativeSection key={init.id}
           init={init} projects={projects} projOrder={projOrder}
-          issues={activeIssues} orderMap={orderMap} initId={initId}
+          issues={issues} excludedIssues={excludedIssues} orderMap={orderMap} initId={initId}
           issueLabels={issueLabels} setIssueLabel={setIssueLabel}
           availableLabels={availableLabels}
           setEst={setEst} setTitle={setTitle} members={members}

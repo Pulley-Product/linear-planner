@@ -58,7 +58,7 @@ const ISSUE_FIELDS = `
   state { name type }
   labels { nodes { id name color } }
   cycle { id startsAt endsAt number }
-  relations { nodes { type relatedIssue { id } } }
+  relations { nodes { id type relatedIssue { id } } }
   parent { id identifier }
   children { nodes { id } }
 `
@@ -90,6 +90,23 @@ export function buildIssueUpdateMutation() {
 export function buildIssueAddLabelMutation() {
   return `mutation IssueAddLabel($id: String!, $labelId: String!) {
     issueAddLabel(id: $id, labelId: $labelId) {
+      success
+    }
+  }`
+}
+
+export function buildRelationCreateMutation() {
+  return `mutation RelationCreate($issueId: String!, $relatedIssueId: String!, $type: IssueRelationType!) {
+    issueRelationCreate(input: { issueId: $issueId, relatedIssueId: $relatedIssueId, type: $type }) {
+      success
+      issueRelation { id }
+    }
+  }`
+}
+
+export function buildRelationDeleteMutation() {
+  return `mutation RelationDelete($id: String!) {
+    issueRelationDelete(id: $id) {
       success
     }
   }`

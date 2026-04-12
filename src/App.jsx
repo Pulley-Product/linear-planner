@@ -93,7 +93,7 @@ export default function App() {
   const [chosenInits, setChosenInits] = useState([])
   const [init, setInit]               = useState(null)
   const [startIso, setStartIso]       = useState(null)
-  const [excludedIssues, setExcludedIssues] = useState(new Set()) // Session only — issues removed from plan
+  const [excludedIssues, setExcludedIssuesRaw] = useState(new Set())
 
   // Persisted state
   const [labelMap, setLabelMap]       = useState({})   // { labelName -> [memberId] }
@@ -101,6 +101,7 @@ export default function App() {
   const [projDeps, setProjDeps]       = useState({})   // { projId -> [projId] }
   const [issueDeps, setIssueDeps]     = useState({})   // { issueId -> [issueId] }
   const [linearDepsSet, setLinearDepsSet] = useState({}) // { issueId -> Set<issueId> } — tracks which deps came from Linear (display only)
+  const [linearRelationIds, setLinearRelationIds] = useState({}) // { "blockedId::blockerId" -> relationId }
   const [crossProjectDeps, setCrossProjectDeps] = useState([]) // [{ blocker, blocked }] — Linear deps across projects (warning only)
   const [projOrder, setProjOrderState] = useState([])  // [projId] in priority order
   const [orderMap, setOrderMap]       = useState({})   // { initId -> { projId -> [issueId] } }
@@ -125,6 +126,7 @@ export default function App() {
     if (d.selInits)    setSelInitsRaw(new Set(d.selInits))
     if (d.selProjects) setSelProjectsRaw(new Set(d.selProjects))
     if (d.caps)        setCapsState(d.caps)
+    if (d.excludedIssues) setExcludedIssuesRaw(new Set(d.excludedIssues))
   }, [])
 
   const persist = useCallback((updates) => {
@@ -146,6 +148,10 @@ export default function App() {
 
   const setSelStates = (s) => {
     setSelStatesRaw(s); persist(snap({ selStates: [...s] }))
+  }
+
+  const setExcludedIssues = (s) => {
+    setExcludedIssuesRaw(s); persist({ excludedIssues: [...s] })
   }
 
   const setSelTeamId = (id) => {
@@ -189,7 +195,21 @@ export default function App() {
 
   const setEst = (id, v) => setIssues(prev => prev.map(i => i.id === id ? { ...i, estimate: parseInt(v) || 1 } : i))
 
-  const setTitle = (id, title) => setIssues(prev => prev.map(i => i.id === id ? { ...i, title } : i))
+  const setTitle = (id, title) => {
+    setIssues(prev => prev.map(i => i.id === id ? { ...i, title } : i))
+    // If title has a [N] prefix, clear saved order for that project so it re-sorts
+    if (/^\[\d+/.test(title)) {
+      const issue = issues.find(i => i.id === id)
+      if (issue?.project?.id && init?.id) {
+        const om = { ...orderMap }
+        if (om[init.id]) {
+          const { [issue.project.id]: _, ...rest } = om[init.id]
+          om[init.id] = rest
+        }
+        setOrderMap(om)
+      }
+    }
+  }
 
   const setCycle = (id, cycleId) => {
     const cycle = cycleId ? cycles.find(c => c.id === cycleId) : null
@@ -258,7 +278,7 @@ export default function App() {
   // ── Step transitions ────────────────────────────────────────────────────────
   const goStep = s => { if (s > 2 && !init) return; setStep(s) }
 
-  const onConnected = ({ apiKey: key, allInits: inits, allTeams: teams, linearDeps, crossProjectDeps: xDeps }) => {
+  const onConnected = ({ apiKey: key, allInits: inits, allTeams: teams, linearDeps, linearRelationIds: relIds, crossProjectDeps: xDeps }) => {
     setApiKey(key); setAllInits(inits); setAllTeams(teams)
     if (teams.length === 1 && !selTeamId) setSelTeamIdRaw(teams[0].id)
     // Validate saved team still exists
@@ -280,6 +300,7 @@ export default function App() {
       setLinearDepsSet(ldSet)
       persist(snap({ issueDeps: merged }))
     }
+    if (relIds) setLinearRelationIds(relIds)
     if (xDeps?.length) setCrossProjectDeps(xDeps)
 
     // ── Restore session if we have a saved step and valid selections ──
@@ -635,6 +656,7 @@ export default function App() {
             setTitle={setTitle}
             saveOrder={saveOrder} startIso={startIso} trackEdit={trackEdit}
             edits={edits} setEdits={setEdits} apiKey={apiKey}
+            linearRelationIds={linearRelationIds}
             excludedIssues={excludedIssues} setExcludedIssues={setExcludedIssues}
             err={err}
             onNext={confirmConfigureIssues} onBack={() => setStep(6)}

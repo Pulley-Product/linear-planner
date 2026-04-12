@@ -381,7 +381,7 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
 
     ws.addRow([])
 
-    const sumHeaderRow = ws.addRow(['Initiative / Project', 'Linear Target Date', 'Planned End Cycle', 'Planned End Date'])
+    const sumHeaderRow = ws.addRow(['Initiative / Project', 'Planned End Cycle', 'Cycle End Date', 'Linear Target Date'])
     sumHeaderRow.eachCell((cell) => {
       cell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } }
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A2E' } }
@@ -394,9 +394,9 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
       const initEndCycle = initMaxCI >= 0 ? displayCycles[Math.min(initMaxCI, displayCycles.length - 1)] : null
       const initRow = ws.addRow([
         init.name,
-        fmtD(init.targetDate),
         initEndCycle ? cycleLabel(initEndCycle) : '–',
         initEndCycle?.endsAt ? fmtD(initEndCycle.endsAt) : '–',
+        fmtD(init.targetDate),
       ])
       initRow.getCell(1).font = { bold: true, size: 11 }
       initRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F7' } }
@@ -409,9 +409,9 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
         const projData = (init.projects?.nodes || []).find(p => p.id === proj.id)
         const pRow = ws.addRow([
           `    ${proj.name}`,
-          fmtD(projData?.targetDate),
           pEndCycle ? cycleLabel(pEndCycle) : '–',
           pEndCycle?.endsAt ? fmtD(pEndCycle.endsAt) : '–',
+          fmtD(projData?.targetDate),
         ])
         const pColor = projColor[proj.id] || '#5a5a72'
         pRow.getCell(1).font = { size: 10, color: { argb: 'FF' + pColor.replace('#', '') } }
@@ -538,9 +538,9 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
           <thead>
             <tr style={{ background: '#f5f4f0' }}>
               <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Initiative / Project</th>
-              <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Linear Target Date</th>
               <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Planned End Cycle</th>
-              <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Planned End Date</th>
+              <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Cycle End Date</th>
+              <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Linear Target Date</th>
             </tr>
           </thead>
           <tbody>
@@ -552,14 +552,14 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
               return [
                 <tr key={`init-${init.id}`} style={{ background: '#f9f9f7' }}>
                   <td style={{ padding: '8px 12px', fontWeight: 700, fontSize: 13 }}>{init.name}</td>
-                  <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
-                    {init.targetDate ? new Date(init.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
-                  </td>
                   <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>
                     {initEndCycle ? cycleLabel(initEndCycle) : '–'}
                   </td>
                   <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
                     {initEndCycle?.endsAt ? new Date(initEndCycle.endsAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
+                  </td>
+                  <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
+                    {init.targetDate ? new Date(init.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
                   </td>
                 </tr>,
                 ...initProjs.map(proj => {
@@ -574,14 +574,14 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
                         <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: projColor[proj.id], marginRight: 8, verticalAlign: 'middle' }} />
                         {proj.name}
                       </td>
-                      <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
-                        {projData?.targetDate ? new Date(projData.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
-                      </td>
                       <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontSize: 11 }}>
                         {pEndCycle ? cycleLabel(pEndCycle) : '–'}
                       </td>
                       <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
                         {pEndCycle?.endsAt ? new Date(pEndCycle.endsAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
+                      </td>
+                      <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
+                        {projData?.targetDate ? new Date(projData.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
                       </td>
                     </tr>
                   )
@@ -640,17 +640,6 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
             </tbody>
           </table>
 
-          {/* Legend for diagonal stripes */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, fontSize: 11, color: '#9a9a9e' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 20, height: 14, borderRadius: 3, background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)' }} />
-              <span>Scheduled by planner</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 20, height: 14, borderRadius: 3, background: 'repeating-linear-gradient(135deg, rgba(59,130,246,0.22), rgba(59,130,246,0.22) 4px, rgba(59,130,246,0.08) 4px, rgba(59,130,246,0.08) 8px)', border: '1px solid rgba(59,130,246,0.3)' }} />
-              <span>Committed in Linear (assigned to a cycle)</span>
-            </div>
-          </div>
 
           {/* Issue spreadsheet table */}
           <table style={{ width: FIXED_W + COL_W * numCols, tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 11 }}>
@@ -705,14 +694,11 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
                           <td style={{ padding: '5px 10px', fontSize: 11, color: '#5a5a72', whiteSpace: 'nowrap' }}>{info.member?.name || '–'}</td>
                           {displayCycles.map((_, ci) => {
                             const split = info.splits.find(s => s.ci - startCI === ci)
-                            const committedBg = split && info.committed
-                              ? `repeating-linear-gradient(135deg, ${color}35, ${color}35 4px, ${color}15 4px, ${color}15 8px)`
-                              : undefined
                             return (
                               <td key={ci} style={{
                                 padding: '5px 8px', textAlign: 'center', fontFamily: 'monospace', fontSize: 11, fontWeight: 600,
                                 borderLeft: '1px solid #f0efe9',
-                                background: committedBg || (split ? `${color}18` : 'transparent'),
+                                background: split ? `${color}18` : 'transparent',
                                 color: split ? color : '#dddcd5',
                               }}>
                                 {split ? split.pts : ''}
