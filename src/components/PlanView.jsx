@@ -152,21 +152,18 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
     // SECTION 1: Member allocation
     // ══════════════════════════════════════════════════════════════════════
 
-    // Row 1: Header
     const allocHeaderRow = ws.addRow(['', '', '', '', 'TEAM MEMBER ALLOCATION', ...displayCycles.map(c => cycleLabel(c)), 'TOTAL'])
     allocHeaderRow.eachCell((cell, ci) => {
       if (ci >= memberColIdx) Object.assign(cell, darkHeader)
       cell.border = thinBorder
     })
 
-    // Row 2: Dates
     const dateRow = ws.addRow(['', '', '', '', '', ...displayCycles.map(c => cycleDates(c)), ''])
     dateRow.eachCell((cell, ci) => {
       if (ci >= memberColIdx) { cell.font = { size: 8, color: { argb: 'FF9A9A9E' } }; cell.alignment = { horizontal: 'center' } }
       cell.border = thinBorder
     })
 
-    // Member rows with SUMIF formulas
     const memberStartXlRow = ws.rowCount + 1
     const activeMems = mems.filter(m => Object.keys(memberCyclePts[m.id] || {}).length > 0)
     activeMems.forEach(m => {
@@ -174,7 +171,6 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
       row.eachCell((cell) => { Object.assign(cell, memberStyle); cell.border = thinBorder })
       row.getCell(memberColIdx).font = { bold: true, size: 11 }
       row.getCell(4).font = { size: 8, italic: true, color: { argb: 'FF9A9A9E' } }
-      // Cycle + total cells are placeholders — formulas injected after issue rows
       for (let c = 0; c < numCols; c++) {
         const cell = row.getCell(firstCycCol + c)
         Object.assign(cell, memberNumStyle)
@@ -185,21 +181,18 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
       totalCell.border = thinBorder
     })
 
-    // Blank separator
     ws.addRow([])
 
     // ══════════════════════════════════════════════════════════════════════
-    // SECTION 2: Issue data
+    // SECTION 3: Issue data
     // ══════════════════════════════════════════════════════════════════════
 
-    // Issue column headers
     const issueHeaderXlRow = ws.rowCount + 1
-    const ihRow = ws.addRow(['ID', 'Issue', 'Estimate', 'Label', 'Team Member', ...displayCycles.map(c => cycleLabel(c)), 'Total'])
+    const ihRow = ws.addRow(['ID', 'Issue', 'Est', 'Label', 'Member', ...displayCycles.map(c => cycleLabel(c)), 'Total'])
     ihRow.eachCell((cell) => { Object.assign(cell, darkHeader); cell.border = thinBorder })
 
     const issueDataStartXlRow = ws.rowCount + 1
 
-    // Project color index for alternating project backgrounds
     let projIdx = 0
     const projBgColors = ['FFEEF2FF', 'FFECFDF5', 'FFFEFCE8', 'FFFEF2F2', 'FFF5F3FF', 'FFECFEFF', 'FFFFF7ED', 'FFFDF2F8']
 
@@ -213,36 +206,24 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
         const colorArgb = 'FF' + color.replace('#', '')
         projIdx++
 
-        // Project header row
         const phRow = ws.addRow([`${init.name} >> ${proj.name}`, '', '', '', '', ...displayCycles.map(() => ''), ''])
         ws.mergeCells(phRow.number, 1, phRow.number, totalColIdx)
         phRow.getCell(1).font = { bold: true, size: 11, color: { argb: colorArgb } }
         phRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } }
-        phRow.getCell(1).border = thinBorder
         phRow.eachCell((cell) => { cell.border = thinBorder })
 
-        // Issue rows
         projIssues.forEach((issue, idx) => {
           const info = issueInfo(issue.id)
           const linearLabel = (issue.labels?.nodes || [])[0]?.name || ''
           const label = issueLabels[issue.id] || linearLabel
-          const rowData = [
-            issue.identifier,
-            issue.title,
-            issue.estimate || '',
-            label,
-            info.member?.name || '',
-          ]
+          const rowData = [issue.identifier, issue.title, issue.estimate || '', label, info.member?.name || '']
           displayCycles.forEach((_, ci) => {
             const split = info.splits.find(s => s.ci - startCI === ci)
             rowData.push(split ? split.pts : '')
           })
-          rowData.push('') // Total placeholder
+          rowData.push('')
 
           const iRow = ws.addRow(rowData)
-
-          // Alternate row shading within project
-          const rowBg = idx % 2 === 0 ? 'FFFFFFFF' : 'FFFAFAF9'
           iRow.eachCell((cell, ci) => {
             cell.border = thinBorder
             cell.font = { size: 10 }
@@ -252,7 +233,6 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
           iRow.getCell(3).font = { size: 10, bold: true }
           iRow.getCell(3).alignment = { horizontal: 'center' }
 
-          // Color cycle cells that have values
           displayCycles.forEach((_, ci) => {
             const cell = iRow.getCell(firstCycCol + ci)
             if (cell.value) {
@@ -261,7 +241,6 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
             }
           })
 
-          // Total formula
           const firstCyc = colLetter(firstCycCol - 1)
           const lastCyc = colLetter(firstCycCol + numCols - 2)
           iRow.getCell(totalColIdx).value = { formula: `SUM(${firstCyc}${iRow.number}:${lastCyc}${iRow.number})` }
@@ -292,96 +271,20 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
     })
 
     // ══════════════════════════════════════════════════════════════════════
-    // SECTION 3: Verification
-    // ══════════════════════════════════════════════════════════════════════
-    ws.addRow([])
-    const verifyTitleRow = ws.addRow(['VERIFICATION'])
-    verifyTitleRow.getCell(1).font = { bold: true, size: 12 }
-    const verifyExplainRow = ws.addRow(['This section checks that the SUMIF formulas in the member allocation table above match the values calculated by the Linear Planner app. "OK" (green) means they match. "MISMATCH" (red) means the formula result differs from the app — investigate if you see this.'])
-    ws.mergeCells(verifyExplainRow.number, 1, verifyExplainRow.number, totalColIdx)
-    verifyExplainRow.getCell(1).font = { size: 9, italic: true, color: { argb: 'FF9A9A9E' } }
-    verifyExplainRow.getCell(1).alignment = { wrapText: true }
-
-    const vhRow = ws.addRow(['', '', '', 'Type', 'Member', ...displayCycles.map(c => cycleLabel(c)), 'Total'])
-    vhRow.eachCell((cell) => { Object.assign(cell, lightHeader); cell.border = thinBorder })
-
-    activeMems.forEach((m, mi) => {
-      const memberAllocXlRow = memberStartXlRow + mi
-
-      // Expected row
-      const expRowData = ['', '', '', 'Expected', m.name]
-      let expectedTotal = 0
-      displayCycles.forEach((_, ci) => {
-        const pts = memberCyclePts[m.id]?.[ci] || 0
-        expRowData.push(pts)
-        expectedTotal += pts
-      })
-      expRowData.push(expectedTotal)
-      const expRow = ws.addRow(expRowData)
-      expRow.eachCell((cell, ci) => {
-        cell.border = thinBorder
-        if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' }
-      })
-      expRow.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF9A9A9E' } }
-
-      // Formula row
-      const frmRow = ws.addRow(['', '', '', 'Formula', m.name])
-      displayCycles.forEach((_, ci) => {
-        const cycCol = colLetter(firstCycCol + ci - 1)
-        frmRow.getCell(firstCycCol + ci).value = { formula: `${cycCol}${memberAllocXlRow}` }
-      })
-      const firstCyc = colLetter(firstCycCol - 1)
-      const lastCyc = colLetter(firstCycCol + numCols - 2)
-      frmRow.getCell(totalColIdx).value = { formula: `${colLetter(totalColIdx - 1)}${memberAllocXlRow}` }
-      frmRow.eachCell((cell, ci) => {
-        cell.border = thinBorder
-        if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' }
-      })
-      frmRow.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF9A9A9E' } }
-
-      // Check row — IF match green OK, else red MISMATCH
-      const chkRow = ws.addRow(['', '', '', 'Check', m.name])
-      displayCycles.forEach((_, ci) => {
-        const cycCol = colLetter(firstCycCol + ci - 1)
-        const cell = chkRow.getCell(firstCycCol + ci)
-        cell.value = { formula: `IF(${cycCol}${expRow.number}=${cycCol}${frmRow.number},"OK","MISMATCH")` }
-      })
-      chkRow.getCell(totalColIdx).value = { formula: `IF(${colLetter(totalColIdx - 1)}${expRow.number}=${colLetter(totalColIdx - 1)}${frmRow.number},"OK","MISMATCH")` }
-      chkRow.eachCell((cell, ci) => {
-        cell.border = thinBorder
-        if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' }
-      })
-      chkRow.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF9A9A9E' } }
-
-      // Add conditional formatting for check cells
-      for (let ci = 0; ci <= numCols; ci++) {
-        const col = firstCycCol + ci
-        const cellRef = `${colLetter(col - 1)}${chkRow.number}`
-        ws.addConditionalFormatting({
-          ref: cellRef,
-          rules: [
-            { type: 'containsText', operator: 'containsText', text: 'OK', style: { font: { bold: true, color: { argb: 'FF166534' } }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFDCFCE7' } } }, priority: 1 },
-            { type: 'containsText', operator: 'containsText', text: 'MISMATCH', style: { font: { bold: true, color: { argb: 'FF991B1B' } }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFEE2E2' } } }, priority: 2 },
-          ]
-        })
-      }
-    })
-
-    // ══════════════════════════════════════════════════════════════════════
-    // SECTION 4: Summary — Initiative / Project end dates
+    // SECTION 3: Forward Plan Summary
     // ══════════════════════════════════════════════════════════════════════
 
     ws.addRow([])
     const summaryTitleRow = ws.addRow(['FORWARD PLAN SUMMARY'])
     summaryTitleRow.getCell(1).font = { bold: true, size: 14, color: { argb: 'FF1A1A2E' } }
-    ws.mergeCells(summaryTitleRow.number, 1, summaryTitleRow.number, 4)
+    ws.mergeCells(summaryTitleRow.number, 1, summaryTitleRow.number, 5)
 
     const summaryDateRow = ws.addRow([`Generated: ${new Date().toLocaleString()}`])
     summaryDateRow.getCell(1).font = { size: 9, italic: true, color: { argb: 'FF9A9A9E' } }
 
     ws.addRow([])
 
-    const sumHeaderRow = ws.addRow(['Initiative / Project', 'Planned End Cycle', 'Cycle End Date', 'Linear Target Date'])
+    const sumHeaderRow = ws.addRow(['Initiative', 'Project', 'Planned End Cycle', 'Cycle End Date', 'Linear Target Date'])
     sumHeaderRow.eachCell((cell) => {
       cell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } }
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A2E' } }
@@ -393,7 +296,7 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
       const initMaxCI = initIssues.length ? Math.max(...initIssues.map(s => s._ci)) - startCI : -1
       const initEndCycle = initMaxCI >= 0 ? displayCycles[Math.min(initMaxCI, displayCycles.length - 1)] : null
       const initRow = ws.addRow([
-        init.name,
+        init.name, '',
         initEndCycle ? cycleLabel(initEndCycle) : '–',
         initEndCycle?.endsAt ? fmtD(initEndCycle.endsAt) : '–',
         fmtD(init.targetDate),
@@ -407,17 +310,87 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
         const pMaxCI = pIss.length ? Math.max(...pIss.map(s => s._ci)) - startCI : -1
         const pEndCycle = pMaxCI >= 0 ? displayCycles[Math.min(pMaxCI, displayCycles.length - 1)] : null
         const projData = (init.projects?.nodes || []).find(p => p.id === proj.id)
+        const pColor = projColor[proj.id] || '#5a5a72'
         const pRow = ws.addRow([
-          `    ${proj.name}`,
+          '', proj.name,
           pEndCycle ? cycleLabel(pEndCycle) : '–',
           pEndCycle?.endsAt ? fmtD(pEndCycle.endsAt) : '–',
           fmtD(projData?.targetDate),
         ])
-        const pColor = projColor[proj.id] || '#5a5a72'
-        pRow.getCell(1).font = { size: 10, color: { argb: 'FF' + pColor.replace('#', '') } }
+        pRow.getCell(2).font = { size: 10, color: { argb: 'FF' + pColor.replace('#', '') } }
         pRow.eachCell((cell) => { cell.border = thinBorder })
       })
     })
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SECTION 4: Verification (collapsed via row grouping)
+    // ══════════════════════════════════════════════════════════════════════
+    ws.addRow([])
+    ws.addRow([])
+    const verifyStartRow = ws.rowCount + 1
+    const verifyTitleRow = ws.addRow(['VERIFICATION'])
+    verifyTitleRow.getCell(1).font = { bold: true, size: 12, color: { argb: 'FF9A9A9E' } }
+    const verifyExplainRow = ws.addRow(['Checks that SUMIF formulas in the member allocation table match the app calculations. "OK" = match, "MISMATCH" = investigate.'])
+    ws.mergeCells(verifyExplainRow.number, 1, verifyExplainRow.number, totalColIdx)
+    verifyExplainRow.getCell(1).font = { size: 9, italic: true, color: { argb: 'FF9A9A9E' } }
+    verifyExplainRow.getCell(1).alignment = { wrapText: true }
+
+    const vhRow = ws.addRow(['', '', '', 'Type', 'Member', ...displayCycles.map(c => cycleLabel(c)), 'Total'])
+    vhRow.eachCell((cell) => { Object.assign(cell, lightHeader); cell.border = thinBorder })
+
+    activeMems.forEach((m, mi) => {
+      const memberAllocXlRow = memberStartXlRow + mi
+
+      const expRowData = ['', '', '', 'Expected', m.name]
+      let expectedTotal = 0
+      displayCycles.forEach((_, ci) => {
+        const pts = memberCyclePts[m.id]?.[ci] || 0
+        expRowData.push(pts)
+        expectedTotal += pts
+      })
+      expRowData.push(expectedTotal)
+      const expRow = ws.addRow(expRowData)
+      expRow.eachCell((cell, ci) => { cell.border = thinBorder; if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' } })
+      expRow.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF9A9A9E' } }
+
+      const frmRow = ws.addRow(['', '', '', 'Formula', m.name])
+      displayCycles.forEach((_, ci) => {
+        const cycCol = colLetter(firstCycCol + ci - 1)
+        frmRow.getCell(firstCycCol + ci).value = { formula: `${cycCol}${memberAllocXlRow}` }
+      })
+      frmRow.getCell(totalColIdx).value = { formula: `${colLetter(totalColIdx - 1)}${memberAllocXlRow}` }
+      frmRow.eachCell((cell, ci) => { cell.border = thinBorder; if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' } })
+      frmRow.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF9A9A9E' } }
+
+      const chkRow = ws.addRow(['', '', '', 'Check', m.name])
+      displayCycles.forEach((_, ci) => {
+        const cycCol = colLetter(firstCycCol + ci - 1)
+        chkRow.getCell(firstCycCol + ci).value = { formula: `IF(${cycCol}${expRow.number}=${cycCol}${frmRow.number},"OK","MISMATCH")` }
+      })
+      chkRow.getCell(totalColIdx).value = { formula: `IF(${colLetter(totalColIdx - 1)}${expRow.number}=${colLetter(totalColIdx - 1)}${frmRow.number},"OK","MISMATCH")` }
+      chkRow.eachCell((cell, ci) => { cell.border = thinBorder; if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' } })
+      chkRow.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF9A9A9E' } }
+
+      for (let ci = 0; ci <= numCols; ci++) {
+        const col = firstCycCol + ci
+        const cellRef = `${colLetter(col - 1)}${chkRow.number}`
+        ws.addConditionalFormatting({
+          ref: cellRef,
+          rules: [
+            { type: 'containsText', operator: 'containsText', text: 'OK', style: { font: { bold: true, color: { argb: 'FF166534' } }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFDCFCE7' } } }, priority: 1 },
+            { type: 'containsText', operator: 'containsText', text: 'MISMATCH', style: { font: { bold: true, color: { argb: 'FF991B1B' } }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFEE2E2' } } }, priority: 2 },
+          ]
+        })
+      }
+    })
+
+    // ── Group verification rows (collapsed by default) ──
+    const verifyEndRow = ws.rowCount
+    for (let r = verifyStartRow; r <= verifyEndRow; r++) {
+      ws.getRow(r).outlineLevel = 1
+      ws.getRow(r).hidden = true
+    }
+    ws.properties.outlineLevelRow = 1
 
     // ── Freeze panes ──
     ws.views = [{ state: 'frozen', xSplit: 5, ySplit: issueHeaderXlRow }]
@@ -592,8 +565,9 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
         </table>
       </div>
 
-      {/* Combined scrollable area: member allocation + issue spreadsheet */}
-      <div style={{ overflowX: 'auto', marginBottom: 20, paddingBottom: 16 }}>
+      {/* Combined scrollable area — flipped so scrollbar appears at top */}
+      <div style={{ overflowX: 'auto', marginBottom: 20, transform: 'rotateX(180deg)' }}>
+        <div style={{ transform: 'rotateX(180deg)' }}>
         <div style={{ minWidth: FIXED_W + COL_W * numCols }}>
 
           {/* Per-member allocation table */}
@@ -714,6 +688,7 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
             </tbody>
           </table>
         </div>
+      </div>
       </div>
 
 

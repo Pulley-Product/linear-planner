@@ -102,6 +102,7 @@ export default function App() {
   const [issueDeps, setIssueDeps]     = useState({})   // { issueId -> [issueId] }
   const [linearDepsSet, setLinearDepsSet] = useState({}) // { issueId -> Set<issueId> } — tracks which deps came from Linear (display only)
   const [linearRelationIds, setLinearRelationIds] = useState({}) // { "blockedId::blockerId" -> relationId }
+  const [baselineDeps, setBaselineDeps] = useState({}) // issueDeps snapshot after merge — baseline for session diff
   const [crossProjectDeps, setCrossProjectDeps] = useState([]) // [{ blocker, blocked }] — Linear deps across projects (warning only)
   const [projOrder, setProjOrderState] = useState([])  // [projId] in priority order
   const [orderMap, setOrderMap]       = useState({})   // { initId -> { projId -> [issueId] } }
@@ -302,6 +303,7 @@ export default function App() {
     }
     if (relIds) setLinearRelationIds(relIds)
     if (xDeps?.length) setCrossProjectDeps(xDeps)
+    setEdits({}) // Reset session edits on fresh connect
 
     // ── Restore session if we have a saved step and valid selections ──
     const savedStep = loadStorage().step || 0
@@ -369,6 +371,7 @@ export default function App() {
                 }
               })
               setIssueDeps(cleanedIssueDeps)
+              setBaselineDeps(cleanedIssueDeps)
 
               // Restore state filter (confirmStates logic)
               if (savedStep >= 7 && selStates.size) {
@@ -387,6 +390,7 @@ export default function App() {
       }
     }
 
+    setBaselineDeps(mergedIssueDeps)
     setStep(1)
   }
 
@@ -656,7 +660,14 @@ export default function App() {
             setTitle={setTitle}
             saveOrder={saveOrder} startIso={startIso} trackEdit={trackEdit}
             edits={edits} setEdits={setEdits} apiKey={apiKey}
-            linearRelationIds={linearRelationIds}
+            onSaveComplete={() => {
+              // Update baselines to match current state so indicators clear
+              const ldSet = {}
+              Object.entries(issueDeps).forEach(([id, deps]) => { ldSet[id] = new Set(deps) })
+              setLinearDepsSet(ldSet)
+              setBaselineDeps(issueDeps)
+            }}
+            linearRelationIds={linearRelationIds} baselineDeps={baselineDeps}
             excludedIssues={excludedIssues} setExcludedIssues={setExcludedIssues}
             err={err}
             onNext={confirmConfigureIssues} onBack={() => setStep(6)}

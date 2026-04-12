@@ -200,7 +200,7 @@ function IssueRow({
           style={{ ...ctrlStyle(hasLabel, !hasLabelOrAssignment), width: 90 }}>
           {linearLabel && !issueLabels[issue.id]
             ? <option value=''>{linearLabel}</option>
-            : <option value=''>{linearLabel ? linearLabel + ' (orig)' : 'no label'}</option>
+            : <option value=''>{linearLabel || 'no label'}</option>
           }
           {availableLabels.filter(l => l !== linearLabel).map(l => <option key={l} value={l}>{l}</option>)}
         </select>
@@ -252,6 +252,14 @@ function IssueRow({
             ? `${deps.length} dep${deps.length > 1 ? 's' : ''}`
             : 'no deps'}
         </button>
+        {(() => {
+          const origSet = linearDepsSet[issue.id]
+          const origCount = origSet?.size || 0
+          const currentSet = new Set(deps)
+          const sameDeps = origCount === currentSet.size && (origCount === 0 || [...origSet].every(d => currentSet.has(d)))
+          if (!sameDeps) return <Was text="changed" />
+          return null
+        })()}
       </div>
     </div>
   )
@@ -262,9 +270,9 @@ function ProjectBlock({
   proj, pi, initName, issues, excludedIssues, orderMap, initId, issueLabels, setIssueLabel,
   availableLabels, setEst, setTitle, members, getAssign, setAssign, cycles, setCycle,
   issueDeps, linearDepsSet, setIssueDepsFor, saveOrder, startIso, trackEdit, edits,
-  selected, toggleSelect, expandAll,
+  selected, toggleSelect, expandAll, isFirst,
 }) {
-  const [collapsed, setCollapsed] = useState(true)
+  const [collapsed, setCollapsed] = useState(!isFirst)
   useEffect(() => { if (expandAll !== null) setCollapsed(!expandAll) }, [expandAll])
   const [ord, setOrd] = useState(() => getOrdered(issues, proj.id, orderMap, initId))
   const [modalIssueId, setModalIssueId] = useState(null)
@@ -522,7 +530,7 @@ function ProjectBlock({
                 </div>
                 {modalOthers.map(op => {
                   const checked = modalDeps.includes(op.id)
-                  const isFromLinear = checked && linearDepsSet[modalIssueId]?.has(op.id)
+                  const isFromLinear = linearDepsSet[modalIssueId]?.has(op.id)
                   const circular = !checked && wouldCreateCycle(modalIssueId, op.id)
                   const disabled = circular
                   return (
@@ -563,9 +571,9 @@ function InitiativeSection({
   issueLabels, setIssueLabel, availableLabels,
   setEst, setTitle, members, getAssign, setAssign, cycles, setCycle,
   issueDeps, linearDepsSet, setIssueDepsFor, saveOrder, startIso, trackEdit, edits,
-  selected, toggleSelect, expandAll,
+  selected, toggleSelect, expandAll, isFirst,
 }) {
-  const [collapsed, setCollapsed] = useState(true)
+  const [collapsed, setCollapsed] = useState(!isFirst)
   useEffect(() => { if (expandAll !== null) setCollapsed(!expandAll) }, [expandAll])
   const orderedProjs = projOrder
     .map(id => projects.find(p => p.id === id))
@@ -605,7 +613,7 @@ function InitiativeSection({
         <div style={{ padding: '10px 12px', background: 'white' }}>
           {orderedProjs.map((proj, pi) => (
             <ProjectBlock key={proj.id}
-              proj={proj} pi={pi} initName={init.name}
+              proj={proj} pi={pi} initName={init.name} isFirst={isFirst && pi === 0}
               issues={issues} excludedIssues={excludedIssues} orderMap={orderMap} initId={initId}
               issueLabels={issueLabels} setIssueLabel={setIssueLabel}
               availableLabels={availableLabels}
@@ -633,14 +641,20 @@ export default function StepConfigureIssues({
   setEst, setTitle, members, getAssign, setAssign, cycles, setCycle,
   issueDeps, linearDepsSet, crossProjectDeps, setIssueDepsFor,
   saveOrder, startIso, trackEdit,
-  edits, setEdits, apiKey,
-  linearRelationIds,
+  edits, setEdits, apiKey, onSaveComplete,
+  linearRelationIds, baselineDeps,
   excludedIssues, setExcludedIssues,
   err, onNext, onBack,
 }) {
   const [selected, setSelected] = useState(new Set())
   const [showExcluded, setShowExcluded] = useState(false)
   const [showCrossProjectDeps, setShowCrossProjectDeps] = useState(false)
+  const [userChangedDeps, setUserChangedDeps] = useState(false)
+  const wrappedSetIssueDepsFor = (issueId, depIds) => {
+    setUserChangedDeps(true)
+    setSaveResult(null)
+    setIssueDepsFor(issueId, depIds)
+  }
   const [expandSignal, setExpandSignal] = useState(0) // positive=expand, negative=collapse, 0=default
   const expandAll = expandSignal === 0 ? null : expandSignal > 0
   const activeIssues = issues.filter(i => !excludedIssues.has(i.id))
@@ -692,31 +706,34 @@ export default function StepConfigureIssues({
     setExcludedIssues(new Set())
   }
 
-  // ── Dep diffs ──
-  const depAdded = [] // [{ blockedId, blockerId }]
-  const depRemoved = [] // [{ blockedId, blockerId, relationId }]
-  Object.entries(issueDeps).forEach(([blockedId, blockerIds]) => {
-    const origSet = linearDepsSet[blockedId]
-    blockerIds.forEach(blockerId => {
-      if (!origSet?.has(blockerId)) {
-        depAdded.push({ blockedId, blockerId })
-      }
+  // ── Dep diffs (only after user has changed deps this session) ──
+  const depAdded = []
+  const depRemoved = []
+  if (userChangedDeps) {
+    Object.entries(issueDeps).forEach(([blockedId, blockerIds]) => {
+      const baseSet = new Set(baselineDeps[blockedId] || [])
+      blockerIds.forEach(blockerId => {
+        if (!baseSet.has(blockerId)) {
+          depAdded.push({ blockedId, blockerId })
+        }
+      })
     })
-  })
-  Object.entries(linearDepsSet).forEach(([blockedId, origBlockers]) => {
-    const currentDeps = new Set(issueDeps[blockedId] || [])
-    origBlockers.forEach(blockerId => {
-      if (!currentDeps.has(blockerId)) {
-        const relationId = linearRelationIds[`${blockedId}::${blockerId}`]
-        if (relationId) depRemoved.push({ blockedId, blockerId, relationId })
-      }
+    Object.entries(baselineDeps).forEach(([blockedId, baseBlockerIds]) => {
+      const currentDeps = new Set(issueDeps[blockedId] || [])
+      baseBlockerIds.forEach(blockerId => {
+        if (!currentDeps.has(blockerId)) {
+          const relationId = linearRelationIds[`${blockedId}::${blockerId}`]
+          if (relationId) depRemoved.push({ blockedId, blockerId, relationId })
+        }
+      })
     })
-  })
+  }
   const depChangeCount = depAdded.length + depRemoved.length
 
   // ── Save to Linear ──
-  const editCount = Object.values(edits).reduce((sum, e) => sum + Object.keys(e).length, 0)
+  const editCount = Object.keys(edits).length ? Object.values(edits).reduce((sum, e) => sum + Object.keys(e).length, 0) : 0
   const totalChangeCount = editCount + depChangeCount
+  const hasChanges = editCount > 0 || userChangedDeps
   const [saving, setSaving] = useState(false)
   const [saveResult, setSaveResult] = useState(null)
 
@@ -741,7 +758,10 @@ export default function StepConfigureIssues({
         }
         ok++
       } catch (e) {
-        errors.push(`${label}: ${e.message}`)
+        const msg = e.message.includes('Discrepancy between issue team')
+          ? 'issue belongs to a different team than the selected cycle — update the issue\'s team in Linear first'
+          : e.message
+        errors.push(`${label}: ${msg}`)
         failed++
       }
     }
@@ -776,24 +796,18 @@ export default function StepConfigureIssues({
 
     setSaving(false)
     setSaveResult({ ok, failed, errors })
-    if (failed === 0) setEdits({})
+    if (failed === 0) {
+      setEdits({})
+      setUserChangedDeps(false)
+      // Update linearDepsSet to match current issueDeps so "Linear: changed" indicators disappear
+      if (onSaveComplete) onSaveComplete()
+    }
   }
 
   return (
     <div>
       <H1>Configure <R>Issues</R></H1>
       <Sub>Set estimates, labels, assignments, order, and dependencies for all issues. Drag to reorder within each project. Click a title to edit it (e.g. add [N] prefixes).</Sub>
-
-      {/* Excluded issues count */}
-      {excludedList.length > 0 && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', marginBottom: 14,
-          background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, fontSize: 11,
-        }}>
-          <span style={{ color: '#92400e' }}>{excludedList.length} issue{excludedList.length !== 1 ? 's' : ''} excluded from plan (greyed out below)</span>
-          <span onClick={restoreAll} style={{ color: '#1d4ed8', cursor: 'pointer', fontFamily: 'monospace' }}>restore all</span>
-        </div>
-      )}
 
       {/* Cross-project deps warning */}
       {relevantCrossProjectDeps.length > 0 && (
@@ -866,29 +880,25 @@ export default function StepConfigureIssues({
       {err && <Err>{err}</Err>}
 
       {/* Save to Linear */}
-      {totalChangeCount > 0 && (
+      {hasChanges && totalChangeCount > 0 && (
         <div style={{
-          background: '#dbeafe', border: '1px solid #93c5fd', borderRadius: 8,
-          padding: '8px 14px', marginBottom: 14, fontSize: 11, color: '#1e40af',
+          background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8,
+          padding: '8px 14px', marginBottom: 14, fontSize: 11, color: '#991b1b',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontWeight: 700, flex: 1 }}>
               {totalChangeCount} change{totalChangeCount !== 1 ? 's' : ''} from Linear data
-              {depChangeCount > 0 ? ` (${depAdded.length} dep${depAdded.length !== 1 ? 's' : ''} added, ${depRemoved.length} removed)` : ''}
             </span>
             <Btn onClick={saveToLinear} disabled={saving}>
               {saving ? 'Saving...' : 'Save to Linear'}
             </Btn>
           </div>
-          {saveResult && (
+          {saveResult?.failed > 0 && (
             <div style={{
               marginTop: 6, padding: '6px 10px', borderRadius: 6, fontFamily: 'monospace',
-              background: saveResult.failed ? '#fef2f2' : '#f0fdf4',
-              color: saveResult.failed ? '#991b1b' : '#166534',
+              background: '#fef2f2', color: '#991b1b',
             }}>
-              {saveResult.failed
-                ? <>{saveResult.ok} saved, {saveResult.failed} failed:{saveResult.errors?.map((err, i) => <div key={i} style={{ marginTop: 4 }}>{err}</div>)}</>
-                : `${saveResult.ok} issue${saveResult.ok !== 1 ? 's' : ''} updated in Linear`}
+              {saveResult.ok} saved, {saveResult.failed} failed:{saveResult.errors?.map((err, i) => <div key={i} style={{ marginTop: 4 }}>{err}</div>)}
             </div>
           )}
         </div>
@@ -920,8 +930,8 @@ export default function StepConfigureIssues({
         const aMin = Math.min(...(a.projects?.nodes || []).map(p => { const i = projOrder.indexOf(p.id); return i === -1 ? Infinity : i }))
         const bMin = Math.min(...(b.projects?.nodes || []).map(p => { const i = projOrder.indexOf(p.id); return i === -1 ? Infinity : i }))
         return aMin - bMin
-      }).map(init => (
-        <InitiativeSection key={init.id}
+      }).map((init, initIdx) => (
+        <InitiativeSection key={init.id} isFirst={initIdx === 0}
           init={init} projects={projects} projOrder={projOrder}
           issues={issues} excludedIssues={excludedIssues} orderMap={orderMap} initId={initId}
           issueLabels={issueLabels} setIssueLabel={setIssueLabel}
@@ -930,7 +940,7 @@ export default function StepConfigureIssues({
           getAssign={getAssign} setAssign={setAssign}
           cycles={cycles} setCycle={setCycle}
           issueDeps={issueDeps} linearDepsSet={linearDepsSet}
-          setIssueDepsFor={setIssueDepsFor}
+          setIssueDepsFor={wrappedSetIssueDepsFor}
           saveOrder={saveOrder} startIso={startIso}
           trackEdit={trackEdit} edits={edits}
           selected={selected} toggleSelect={toggleSelect}
