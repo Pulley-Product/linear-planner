@@ -6,6 +6,7 @@ import { getOrdered } from '../utils/plan.js'
 export function StepTeam({ allTeams, selTeamId, setSelTeamId, selMemberIds, setSelMemberIds, onNext, onBack }) {
   const selTeam = allTeams.find(t => t.id === selTeamId)
   const teamMembers = selTeam?.members?.nodes || []
+  const [showAllTeams, setShowAllTeams] = useState(false)
 
   const toggleMember = (mid) => {
     const ns = new Set(selMemberIds)
@@ -17,25 +18,45 @@ export function StepTeam({ allTeams, selTeamId, setSelTeamId, selMemberIds, setS
     <div>
       <H1>Pick a Team & Select <R>Members</R></H1>
       <Sub>Select the team whose members and cycles will be used for this plan. Uncheck members who should not be assigned issues.</Sub>
+      <Row>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <Btn onClick={onNext} disabled={!selTeamId || !selMemberIds.size}>Confirm Team & Members →</Btn>
+      </Row>
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <Card>
-            {[...allTeams].sort((a, b) => a.name.localeCompare(b.name)).map(t => (
-              <div key={t.id} onClick={() => {
-                setSelTeamId(t.id)
-                const mids = new Set((t.members?.nodes || []).map(m => m.id))
-                setSelMemberIds(mids)
-              }} style={pickRowStyle(selTeamId === t.id)}>
-                <Radio checked={selTeamId === t.id} />
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{t.name}</div>
-                  <div style={{ fontSize: 11, color: '#9a9a9e', fontFamily: 'monospace', marginTop: 2 }}>
-                    {t.members?.nodes?.length || 0} members ·{' '}
-                    {t.cycles?.nodes?.length || 0} active/upcoming cycles
+            {(() => {
+              const priorityNames = ['App Team 1', 'App Team 2', 'AI Team 1', 'AI Team 2', 'Platform']
+              const popular = priorityNames.map(n => allTeams.find(t => t.name === n)).filter(Boolean)
+              const all = [...allTeams].sort((a, b) => a.name.localeCompare(b.name))
+              const renderTeam = (t) => (
+                <div key={t.id} onClick={() => {
+                  setSelTeamId(t.id)
+                  const mids = new Set((t.members?.nodes || []).map(m => m.id))
+                  setSelMemberIds(mids)
+                }} style={pickRowStyle(selTeamId === t.id)}>
+                  <Radio checked={selTeamId === t.id} />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{t.name}</div>
+                    <div style={{ fontSize: 11, color: '#9a9a9e', fontFamily: 'monospace', marginTop: 2 }}>
+                      {t.members?.nodes?.length || 0} members &middot;{' '}
+                      {t.cycles?.nodes?.length || 0} active/upcoming cycles
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+              return <>
+                {popular.length > 0 && <>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 12px 6px', fontFamily: 'monospace' }}>Popular Teams</div>
+                  {popular.map(renderTeam)}
+                  <div onClick={() => setShowAllTeams(p => !p)} style={{ fontSize: 10, fontWeight: 700, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '12px 12px 6px', fontFamily: 'monospace', borderTop: '1px solid #e8e7e3', marginTop: 8, cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 8, transition: 'transform 0.15s', transform: showAllTeams ? 'rotate(0deg)' : 'rotate(-90deg)' }}>&#9660;</span>
+                    All Teams ({all.length})
+                  </div>
+                </>}
+                {showAllTeams && all.map(renderTeam)}
+              </>
+            })()}
           </Card>
         </div>
 
@@ -86,6 +107,10 @@ export function StepCycle({ cycles, selCycleId, setSelCycleId, err, onNext, onBa
     <div>
       <H1>Pick <R>Start Cycle</R></H1>
       <Sub>The plan starts at the beginning of this cycle. Week 1 = first week of the selected cycle.</Sub>
+      <Row>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <Btn onClick={onNext} disabled={!selCycleId}>Confirm Start Cycle →</Btn>
+      </Row>
       <Card>
         {cycles.length === 0 && (
           <p style={{ color: '#9a9a9e', fontFamily: 'monospace', fontSize: 13 }}>
@@ -160,6 +185,10 @@ export function StepInitiatives({ allInits, selInits, setSelInits, onNext, onBac
     <div>
       <H1>Select <R>Initiatives</R></H1>
       <Sub>Pick which initiatives to include. This determines which projects are available in the next step.</Sub>
+      <Row>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <Btn onClick={onNext} disabled={!selInits.size}>Next →</Btn>
+      </Row>
       <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search initiatives..."
         style={{ ...inpS, marginBottom: 12, width: '100%' }} />
 
@@ -277,6 +306,16 @@ export function StepProjects({ allInits, selInits, selProjects, setSelProjects, 
     <div>
       <H1>Select <R>Projects</R></H1>
       <Sub>Pick which projects to include from the selected initiatives. Check an initiative name to select all its projects.</Sub>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 20 }}>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <GBtn onClick={() => setSelProjects(new Set(allProjIds))}>All</GBtn>
+          <GBtn onClick={() => setSelProjects(new Set())}>None</GBtn>
+          <Btn onClick={onNext} disabled={!selProjects.size}>
+            Load {selProjects.size} Project{selProjects.size !== 1 ? 's' : ''} →
+          </Btn>
+        </div>
+      </div>
       <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search projects or initiatives..."
         style={{ ...inpS, marginBottom: 12, width: '100%' }} />
 
@@ -319,14 +358,16 @@ export function StepProjects({ allInits, selInits, selProjects, setSelProjects, 
         )
       })}
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-        <Btn onClick={onNext} disabled={!selProjects.size}>
-          Load {selProjects.size} Project{selProjects.size !== 1 ? 's' : ''} →
-        </Btn>
-        <GBtn onClick={() => setSelProjects(new Set(allProjIds))}>All</GBtn>
-        <GBtn onClick={() => setSelProjects(new Set())}>None</GBtn>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 20 }}>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <GBtn onClick={() => setSelProjects(new Set(allProjIds))}>All</GBtn>
+          <GBtn onClick={() => setSelProjects(new Set())}>None</GBtn>
+          <Btn onClick={onNext} disabled={!selProjects.size}>
+            Load {selProjects.size} Project{selProjects.size !== 1 ? 's' : ''} →
+          </Btn>
+        </div>
       </div>
-      <Row><GBtn onClick={onBack}>← Back</GBtn></Row>
     </div>
   )
 }
@@ -352,6 +393,10 @@ export function StepStates({ issues, selStates, setSelStates, onNext, onBack }) 
     <div>
       <H1>Select <R>Issue States</R></H1>
       <Sub>Pick which issue states to include in the plan. Unselected states will be excluded.</Sub>
+      <Row>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <Btn onClick={onNext} disabled={!selStates.size}>Next →</Btn>
+      </Row>
       <Card>
         {stateTypes.map(t => {
           const sel = selStates.has(t)
@@ -464,6 +509,7 @@ export function StepLabelMap({ labels, members, labelMap, issues, toggleLabelMem
     <div>
       <H1>Assign <R>Issue Labels</R> to <R>Team Members</R></H1>
       <Sub>Tick which team members can work on each label. Members can cover multiple labels.</Sub>
+      <Row><GBtn onClick={onBack}>← Back</GBtn><Btn onClick={onNext}>Next →</Btn></Row>
 
       {usedLabels.length > 0 && (
         <Card>{renderLabelGrid(usedLabels)}</Card>
@@ -570,6 +616,11 @@ export function StepProjOrder({ projects, issues, chosenInits, projOrder, setPro
     <div>
       <H1>Determine <R>Project Priority</R></H1>
       <Sub>Drag projects into priority order. #1 gets first pick of capacity. Click "depends on completion of" to set hard dependencies.</Sub>
+      <Row><GBtn onClick={onBack}>← Back</GBtn><Btn onClick={() => {
+        const err = validateOrder(projOrder)
+        if (err) setDropError(err)
+        else onNext()
+      }}>Next →</Btn></Row>
       <div
         onDragOver={e => {
           e.preventDefault(); e.dataTransfer.dropEffect = 'move'

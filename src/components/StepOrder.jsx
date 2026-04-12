@@ -3,7 +3,8 @@ import { Btn, GBtn, Check, Row, H1, R, Sub } from './ui.jsx'
 import { getOrdered } from '../utils/plan.js'
 
 // ── Issue Row ────────────────────────────────────────────────────────────────
-function IssueRow({ issue, idx, isDragging, issueLabels, deps, onOpenDepModal, isCommitted }) {
+function IssueRow({ issue, idx, isDragging, issueLabels, deps, linearDepsSet, onOpenDepModal, isCommitted }) {
+  const linearCount = deps.filter(d => linearDepsSet[issue.id]?.has(d)).length
   const linearLabel = (issue.labels?.nodes || [])[0]?.name || ''
   const effectiveLabel = issueLabels[issue.id] || linearLabel
   const hasEst = issue.estimate != null && issue.estimate > 0
@@ -59,14 +60,16 @@ function IssueRow({ issue, idx, isDragging, issueLabels, deps, onOpenDepModal, i
           color: deps.length ? '#e63946' : '#c8c7be',
           outline: deps.length ? '1px solid rgba(230,57,70,0.2)' : 'none',
         }}>
-        {deps.length ? `${deps.length} dep${deps.length > 1 ? 's' : ''}` : 'deps'}
+        {deps.length
+          ? `${deps.length} dep${deps.length > 1 ? 's' : ''}${linearCount ? ` (${linearCount} from Linear)` : ''}`
+          : 'deps'}
       </button>
     </div>
   )
 }
 
 // ── Project Block (issues inside) ────────────────────────────────────────────
-function ProjectBlock({ proj, pi, initName, issues, orderMap, initId, issueLabels, issueDeps, setIssueDepsFor, saveOrder, startIso }) {
+function ProjectBlock({ proj, pi, initName, issues, orderMap, initId, issueLabels, issueDeps, linearDepsSet, setIssueDepsFor, saveOrder, startIso }) {
   const [ord, setOrd] = useState(() => getOrdered(issues, proj.id, orderMap, initId))
   const [modalIssueId, setModalIssueId] = useState(null)
   const dragFrom = useRef(null)
@@ -257,6 +260,7 @@ function ProjectBlock({ proj, pi, initName, issues, orderMap, initId, issueLabel
                   isDragging={draggingIdx === idx}
                   issueLabels={issueLabels}
                   deps={deps}
+                  linearDepsSet={linearDepsSet}
                   isCommitted={isCommitted}
                   onOpenDepModal={setModalIssueId}
                 />
@@ -299,6 +303,7 @@ function ProjectBlock({ proj, pi, initName, issues, orderMap, initId, issueLabel
             </div>
             {modalOthers.map(op => {
               const checked = modalDeps.includes(op.id)
+              const isFromLinear = checked && linearDepsSet[modalIssueId]?.has(op.id)
               const circular = !checked && wouldCreateCycle(modalIssueId, op.id)
               const cycleViolation = !checked && wouldViolateCycleOrder(modalIssueId, op.id)
               const disabled = circular || cycleViolation
@@ -316,6 +321,9 @@ function ProjectBlock({ proj, pi, initName, issues, orderMap, initId, issueLabel
                   <Check checked={checked} />
                   <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', flexShrink: 0 }}>{op.identifier}</span>
                   <span style={{ flex: 1, fontSize: 12, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{op.title}</span>
+                  {isFromLinear && (
+                    <span style={{ fontSize: 8, fontFamily: 'monospace', padding: '2px 5px', borderRadius: 4, background: '#dbeafe', color: '#1d4ed8', flexShrink: 0 }}>Linear</span>
+                  )}
                 </div>
               )
             })}
@@ -332,7 +340,7 @@ function ProjectBlock({ proj, pi, initName, issues, orderMap, initId, issueLabel
 // ── Main Step: Order Issues ──────────────────────────────────────────────────
 export default function StepOrderIssues({
   chosenInits, projects, issues, projOrder,
-  orderMap, initId, issueLabels, issueDeps, setIssueDepsFor, saveOrder, startIso, onNext, onBack
+  orderMap, initId, issueLabels, issueDeps, linearDepsSet, crossProjectDeps, setIssueDepsFor, saveOrder, startIso, onNext, onBack
 }) {
   const projInitName = {}
   chosenInits.forEach(init => {
@@ -351,14 +359,36 @@ export default function StepOrderIssues({
         fontSize: 11, color: '#92400e', lineHeight: 1.6,
       }}>
         <span style={{ flexShrink: 0, fontSize: 14 }}>&#9432;</span>
-        <span>Issue ordering on this screen is <strong>for this planning session only</strong> and will not be saved. To set a permanent order, use the [N] prefix in issue titles in Linear (e.g. [1], [2], [3]).</span>
+        <span>Issue ordering on this screen is <strong>for this planning session only</strong> and will not be saved. To set a permanent order, use the [N] prefix in issue titles in Linear (e.g. [1], [2], [3]). Dependencies set in Linear (blocks/blocked by) are imported automatically — you can also add or remove dependencies manually here.</span>
       </div>
+
+      {(() => {
+        const issueIds = new Set(issues.map(i => i.id))
+        const relevant = (crossProjectDeps || []).filter(d => issueIds.has(d.blocker.id) || issueIds.has(d.blocked.id))
+        if (!relevant.length) return null
+        return (
+          <div style={{
+            background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8,
+            padding: '10px 14px', marginBottom: 14, fontSize: 11, color: '#991b1b', lineHeight: 1.6,
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Cross-project dependencies found in Linear</div>
+            <div style={{ marginBottom: 6 }}>
+              The planner only supports dependencies within the same project. These cross-project dependencies will not be taken into account:
+            </div>
+            {relevant.map((d, i) => (
+              <div key={i} style={{ fontFamily: 'monospace', fontSize: 10, padding: '2px 0' }}>
+                {d.blocked.identifier} ({d.blocked.project?.name}) is blocked by {d.blocker.identifier} ({d.blocker.project?.name})
+              </div>
+            ))}
+          </div>
+        )
+      })()}
 
       {ordered.map((proj, i) => (
         <ProjectBlock key={proj.id}
           proj={proj} pi={i} initName={projInitName[proj.id] || 'Unknown'}
           issues={issues} orderMap={orderMap} initId={initId}
-          issueLabels={issueLabels} issueDeps={issueDeps} setIssueDepsFor={setIssueDepsFor}
+          issueLabels={issueLabels} issueDeps={issueDeps} linearDepsSet={linearDepsSet} setIssueDepsFor={setIssueDepsFor}
           saveOrder={saveOrder} startIso={startIso}
         />
       ))}

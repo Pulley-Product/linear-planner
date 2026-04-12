@@ -66,7 +66,7 @@ export function Card({ children, style }) {
 
 export function Row({ children }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 20 }}>
       {children}
     </div>
   )

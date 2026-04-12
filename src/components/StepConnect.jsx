@@ -1,15 +1,19 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Btn, Card, H1, R, Sub, Err, inpS } from './ui.jsx'
 import { linearQuery, GQL_INITIATIVES, GQL_TEAMS, buildIssueQuery, STATE_TYPES } from '../utils/linear.js'
 
-export default function StepConnect({ onConnected }) {
+export default function StepConnect({ onConnected, autoConnect }) {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('lp-apikey') || '')
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [showPrep, setShowPrep] = useState(false)
+  const didAutoConnect = useRef(false)
+  const cancelled = useRef(false)
 
   const connect = async () => {
     const key = apiKey.replace(/[^ -~]/g, '').trim()
     if (!key) { setStatus('Please enter your API key.'); return }
+    cancelled.current = false
     setLoading(true)
     setStatus(null)
     try {
@@ -48,22 +52,90 @@ export default function StepConnect({ onConnected }) {
         projects: { nodes: (it.projects?.nodes || []).map(p => ({ ...p, _issues: byProj[p.id] || [] })) },
       }))
 
+      // Extract issue dependencies from Linear relations
+      // Linear relation types: "blocks" = this issue blocks relatedIssue
+      // We need issueDeps format: { issueId -> [issueIds it depends on] }
+      const allIssueIds = new Set(allIssueNodes.map(i => i.id))
+      const issueProj = {} // issueId -> projectId
+      allIssueNodes.forEach(i => { if (i.project?.id) issueProj[i.id] = i.project.id })
+
+      const linearDeps = {}
+      const crossProjectDeps = [] // [{ issue, dep }] — for warning display
+      allIssueNodes.forEach(issue => {
+        (issue.relations?.nodes || []).forEach(rel => {
+          const rid = rel.relatedIssue?.id
+          if (!rid || !allIssueIds.has(rid)) return
+
+          let fromId, toId // toId depends on fromId
+          if (rel.type === 'blocks') {
+            fromId = issue.id; toId = rid
+          } else if (rel.type === 'is blocked by') {
+            fromId = rid; toId = issue.id
+          } else return
+
+          // Check if cross-project
+          if (issueProj[fromId] && issueProj[toId] && issueProj[fromId] !== issueProj[toId]) {
+            const fromIssue = allIssueNodes.find(i => i.id === fromId)
+            const toIssue = allIssueNodes.find(i => i.id === toId)
+            if (fromIssue && toIssue) {
+              crossProjectDeps.push({ blocker: fromIssue, blocked: toIssue })
+            }
+            return // skip — don't import cross-project deps
+          }
+
+          if (!linearDeps[toId]) linearDeps[toId] = []
+          if (!linearDeps[toId].includes(fromId)) linearDeps[toId].push(fromId)
+        })
+      })
+
+      if (cancelled.current) return
       onConnected({
         apiKey: key,
         allInits: enrichedInits,
         allTeams: d1.teams.nodes,
         rawIssues: d2.issues.nodes,
+        linearDeps,
+        crossProjectDeps,
       })
     } catch (e) {
+      if (cancelled.current) return
       setStatus(e.message || 'Failed to connect')
       setLoading(false)
     }
+  }
+
+  const [autoConnecting, setAutoConnecting] = useState(false)
+
+  // Auto-connect on mount if saved key exists and autoConnect is requested
+  useEffect(() => {
+    if (autoConnect && apiKey && !didAutoConnect.current) {
+      didAutoConnect.current = true
+      setAutoConnecting(true)
+      connect()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const cancelAutoConnect = () => {
+    cancelled.current = true
+    setAutoConnecting(false)
+    setLoading(false)
+    setStatus(null)
   }
 
   return (
     <div>
       <H1>Connect to <R>Linear</R></H1>
       <Sub>Enter your Linear API key to load your workspace. Your key is stored locally in your browser only.</Sub>
+
+      {autoConnecting && loading && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', marginBottom: 14,
+          background: 'rgba(26,26,46,0.04)', border: '1px solid #dddcd5', borderRadius: 8,
+        }}>
+          <span style={{ fontSize: 12, color: '#5a5a72' }}>Reconnecting with saved key...</span>
+          <span onClick={cancelAutoConnect} style={{ fontSize: 11, color: '#1d4ed8', cursor: 'pointer', fontFamily: 'monospace' }}>cancel & change key</span>
+        </div>
+      )}
 
       <Card>
         <div style={{ marginBottom: 16 }}>
@@ -99,14 +171,17 @@ export default function StepConnect({ onConnected }) {
 
         <div style={{ marginTop: 16, fontSize: 11, color: '#9a9a9e', fontFamily: 'monospace', lineHeight: 1.8 }}>
           ↳ Get your key: linear.app → Settings → Security & Access → Personal API Keys → New API Key<br />
-          ↳ When creating the key, select <strong>read-only</strong> permissions
+          ↳ Select <strong>read-write</strong> permissions if you want to save changes back to Linear (read-only works for planning only)
         </div>
       </Card>
 
-      {/* Prep guide */}
+      {/* Prep guide — collapsible */}
       <div style={{ marginTop: 24 }}>
-        <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>Prepare your <span style={{ color: '#e63946' }}>Linear workspace</span></div>
-        <p style={{ color: '#5a5a72', fontSize: 13, fontWeight: 300, marginBottom: 14 }}>
+        <div onClick={() => setShowPrep(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}>
+          <span style={{ fontSize: 10, color: '#9a9a9e', transition: 'transform 0.15s', transform: showPrep ? 'rotate(0deg)' : 'rotate(-90deg)' }}>&#9660;</span>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>Prepare your <span style={{ color: '#e63946' }}>Linear workspace</span></div>
+        </div>
+        {!showPrep ? null : <><p style={{ color: '#5a5a72', fontSize: 13, fontWeight: 300, marginBottom: 14, marginTop: 6 }}>
           For best results, set up the following in Linear before generating a plan:
         </p>
 
@@ -158,6 +233,7 @@ export default function StepConnect({ onConnected }) {
 
           </div>
         </div>
+        </>}
       </div>
     </div>
   )

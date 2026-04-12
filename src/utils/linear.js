@@ -58,6 +58,9 @@ const ISSUE_FIELDS = `
   state { name type }
   labels { nodes { id name color } }
   cycle { id startsAt endsAt number }
+  relations { nodes { type relatedIssue { id } } }
+  parent { id identifier }
+  children { nodes { id } }
 `
 
 const STATE_TYPES = ['triage', 'backlog', 'unstarted', 'started', 'completed', 'cancelled']
@@ -69,6 +72,33 @@ export function buildIssueQuery(stateType) {
       first: 250
     ) {
       nodes { ${ISSUE_FIELDS} }
+    }
+  }`
+}
+
+// ── Mutations ────────────────────────────────────────────────────────────────
+
+export function buildIssueUpdateMutation() {
+  return `mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
+    issueUpdate(id: $id, input: $input) {
+      success
+      issue { id }
+    }
+  }`
+}
+
+export function buildIssueAddLabelMutation() {
+  return `mutation IssueAddLabel($id: String!, $labelId: String!) {
+    issueAddLabel(id: $id, labelId: $labelId) {
+      success
+    }
+  }`
+}
+
+export function buildIssueRemoveLabelMutation() {
+  return `mutation IssueRemoveLabel($id: String!, $labelId: String!) {
+    issueRemoveLabel(id: $id, labelId: $labelId) {
+      success
     }
   }`
 }

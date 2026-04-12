@@ -2,8 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { loadStorage, saveStorage } from './utils/storage.js'
 import { computePlan, getEligible, getOrdered } from './utils/plan.js'
 import StepConnect from './components/StepConnect.jsx'
-import { StepTeam, StepCycle, StepInitiatives, StepProjects, StepProjOrder, StepStates, StepLabelMap, StepLabelEstimate } from './components/StepSetup.jsx'
-import StepOrderIssues from './components/StepOrder.jsx'
+import { StepTeam, StepCycle, StepInitiatives, StepProjects, StepProjOrder, StepStates, StepLabelMap } from './components/StepSetup.jsx'
+import StepConfigureIssues from './components/StepConfigureIssues.jsx'
 import { StepCapacity } from './components/StepEstimatesCapacity.jsx'
 import PlanView from './components/PlanView.jsx'
 
@@ -24,7 +24,8 @@ function PasswordGate({ onUnlock }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ appPassword: pw.trim() }),
       })
-      if (resp.ok) {
+      if (resp.ok || resp.status === 404) {
+        // 404 = local dev (no /auth endpoint) — skip the gate
         localStorage.setItem('lp-app-password', pw.trim())
         onUnlock()
       } else {
@@ -60,15 +61,15 @@ function PasswordGate({ onUnlock }) {
 }
 
 // Steps: 0=connect 1=team 2=cycle 3=initiatives 4=projects 5=projpriority 6=states
-//        7=label&estimate 8=order 9=labels>members 10=capacity 11=plan
-const STEPS = ['Connect','Team & Members','Start Cycle','Initiatives','Projects','Project Priority','Issue States','Label & Estimate','Order Issues','Labels > Team Members','Capacity','Plan']
+//        7=configure 8=labels>members 9=capacity 10=plan
+const STEPS = ['Connect','Team & Members','Start Cycle','Initiatives','Projects','Project Priority','Issue States','Configure Issues','Labels > Team Members','Capacity','Plan']
 
 export default function App() {
   const [authed, setAuthed] = useState(() => !!localStorage.getItem('lp-app-password'))
   const [step, setStepRaw] = useState(0)
   const [err, setErr]   = useState('')
   const mainRef = useRef(null)
-  const setStep = (s) => { setStepRaw(s); setTimeout(() => mainRef.current?.scrollTo(0, 0), 0) }
+  const setStep = (s) => { setStepRaw(s); saveStorage({ step: s }); setTimeout(() => mainRef.current?.scrollTo(0, 0), 0) }
 
   // From Linear
   const [apiKey, setApiKey]       = useState('')
@@ -92,16 +93,20 @@ export default function App() {
   const [chosenInits, setChosenInits] = useState([])
   const [init, setInit]               = useState(null)
   const [startIso, setStartIso]       = useState(null)
+  const [excludedIssues, setExcludedIssues] = useState(new Set()) // Session only — issues removed from plan
 
   // Persisted state
   const [labelMap, setLabelMap]       = useState({})   // { labelName -> [memberId] }
   const [issueLabels, setIssueLabels] = useState({})   // { issueId -> labelName }
   const [projDeps, setProjDeps]       = useState({})   // { projId -> [projId] }
   const [issueDeps, setIssueDeps]     = useState({})   // { issueId -> [issueId] }
+  const [linearDepsSet, setLinearDepsSet] = useState({}) // { issueId -> Set<issueId> } — tracks which deps came from Linear (display only)
+  const [crossProjectDeps, setCrossProjectDeps] = useState([]) // [{ blocker, blocked }] — Linear deps across projects (warning only)
   const [projOrder, setProjOrderState] = useState([])  // [projId] in priority order
   const [orderMap, setOrderMap]       = useState({})   // { initId -> { projId -> [issueId] } }
   const [assignMap, setAssignMap]     = useState({})   // { initId -> { issueId -> memberId } }
   const [caps, setCapsState]          = useState({})   // { initId -> { memberId -> pts } }
+  const [edits, setEdits]             = useState({})   // { issueId -> { field -> { original, edited } } } — for future write-back
   const [savedState, setSavedState]   = useState('saved')
   const timer = useRef(null)
   const pendingUpdates = useRef({})
@@ -184,6 +189,12 @@ export default function App() {
 
   const setEst = (id, v) => setIssues(prev => prev.map(i => i.id === id ? { ...i, estimate: parseInt(v) || 1 } : i))
 
+  const setTitle = (id, title) => setIssues(prev => prev.map(i => i.id === id ? { ...i, title } : i))
+
+  const setCycle = (id, cycleId) => {
+    const cycle = cycleId ? cycles.find(c => c.id === cycleId) : null
+    setIssues(prev => prev.map(i => i.id === id ? { ...i, cycle: cycle ? { id: cycle.id, startsAt: cycle.startsAt, endsAt: cycle.endsAt, number: cycle.number } : null } : i))
+  }
 
   const toggleLabelMember = (label, mid) => {
     const cur = new Set(labelMap[label] || [])
@@ -221,17 +232,140 @@ export default function App() {
 
   const getEligibleForIssue = issue => getEligible(issue, members, labelMap, issueLabels)
 
+  const trackEdit = (issueId, field, original, edited, extra) => {
+    // Only record if the value actually changed from the original
+    if (original === edited) {
+      setEdits(prev => {
+        const next = { ...prev }
+        if (next[issueId]) {
+          const { [field]: _, ...rest } = next[issueId]
+          if (Object.keys(rest).length) next[issueId] = rest
+          else delete next[issueId]
+        }
+        return next
+      })
+    } else {
+      setEdits(prev => ({
+        ...prev,
+        [issueId]: { ...(prev[issueId] || {}), [field]: { original, edited, ...extra } },
+      }))
+    }
+  }
+
   const allLabels = Object.keys(labelMap)
   const availableLabels = [...new Set(issues.flatMap(i => (i.labels?.nodes || []).map(l => l.name)))]
 
   // ── Step transitions ────────────────────────────────────────────────────────
   const goStep = s => { if (s > 2 && !init) return; setStep(s) }
 
-  const onConnected = ({ apiKey: key, allInits: inits, allTeams: teams }) => {
+  const onConnected = ({ apiKey: key, allInits: inits, allTeams: teams, linearDeps, crossProjectDeps: xDeps }) => {
     setApiKey(key); setAllInits(inits); setAllTeams(teams)
-    if (teams.length === 1) setSelTeamId(teams[0].id)
+    if (teams.length === 1 && !selTeamId) setSelTeamIdRaw(teams[0].id)
     // Validate saved team still exists
     if (selTeamId && !teams.find(t => t.id === selTeamId)) setSelTeamIdRaw(null)
+
+    // Merge Linear deps into saved deps (additive — Linear deps + manual deps)
+    let mergedIssueDeps = issueDeps
+    if (linearDeps && Object.keys(linearDeps).length) {
+      const merged = { ...issueDeps }
+      const ldSet = {}
+      Object.entries(linearDeps).forEach(([issueId, deps]) => {
+        const existing = new Set(merged[issueId] || [])
+        ldSet[issueId] = new Set(deps)
+        deps.forEach(d => existing.add(d))
+        merged[issueId] = [...existing]
+      })
+      mergedIssueDeps = merged
+      setIssueDeps(merged)
+      setLinearDepsSet(ldSet)
+      persist(snap({ issueDeps: merged }))
+    }
+    if (xDeps?.length) setCrossProjectDeps(xDeps)
+
+    // ── Restore session if we have a saved step and valid selections ──
+    const savedStep = loadStorage().step || 0
+    const effectiveTeamId = selTeamId || (teams.length === 1 ? teams[0].id : null)
+
+    if (savedStep >= 2 && effectiveTeamId) {
+      const team = teams.find(t => t.id === effectiveTeamId)
+      if (team) {
+        // Restore team/members (confirmTeam logic)
+        const teamMembers = team.members?.nodes || []
+        setAllMembers(teamMembers)
+        const teamMemberIds = new Set(teamMembers.map(m => m.id))
+        const validSel = new Set([...selMemberIds].filter(id => teamMemberIds.has(id)))
+        if (!validSel.size) setSelMemberIdsRaw(teamMemberIds)
+        else setSelMemberIdsRaw(validSel)
+        const tc = (team.cycles?.nodes || []).slice().sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt))
+        if (selCycleId && !tc.find(c => c.id === selCycleId)) setSelCycleIdRaw(null)
+
+        // Restore cycle (confirmCycle logic)
+        const cycle = tc.find(c => c.id === selCycleId)
+        if (savedStep >= 3 && cycle) {
+          setStartIso(cycle.startsAt)
+
+          // Restore projects/issues (loadSel logic)
+          if (savedStep >= 5 && selProjects.size) {
+            const projMap = {}
+            inits.forEach(it => (it.projects?.nodes || []).forEach(p => {
+              if (selProjects.has(p.id)) projMap[p.id] = p
+            }))
+            const projs = Object.values(projMap)
+            if (projs.length) {
+              const chosen = inits.filter(it => (it.projects?.nodes || []).some(p => selProjects.has(p.id)))
+              let allIss = []
+              projs.forEach(p => (p._issues || []).forEach(i => { allIss.push({ ...i, project: { id: p.id, name: p.name } }) }))
+              const cid = [...selProjects].sort().join('|')
+              setProjects(projs); setAllIssues(allIss)
+              setChosenInits(chosen)
+              setInit({ id: cid, name: chosen.map(i => i.name).join(' + ') })
+
+              // Restore projOrder
+              const projIds = new Set(projs.map(p => p.id))
+              const projInitName = {}
+              chosen.forEach(init => (init.projects?.nodes || []).forEach(p => { projInitName[p.id] = init.name }))
+              const sortName = id => `${projInitName[id] || ''} >> ${projs.find(p => p.id === id)?.name || ''}`
+              const kept = projOrder.filter(id => projIds.has(id))
+              const added = [...projIds].filter(id => !kept.includes(id)).sort((a, b) => sortName(a).localeCompare(sortName(b)))
+              const order = kept.length ? [...kept, ...added] : [...projIds].sort((a, b) => sortName(a).localeCompare(sortName(b)))
+              setProjOrderState(order)
+
+              // Clean deps
+              const cleanedProjDeps = {}
+              Object.entries(projDeps).forEach(([pid, deps]) => {
+                if (projIds.has(pid)) {
+                  const filtered = deps.filter(d => projIds.has(d))
+                  if (filtered.length) cleanedProjDeps[pid] = filtered
+                }
+              })
+              setProjDeps(cleanedProjDeps)
+              const allIssueIds = new Set(allIss.map(i => i.id))
+              const cleanedIssueDeps = {}
+              Object.entries(mergedIssueDeps).forEach(([iid, deps]) => {
+                if (allIssueIds.has(iid)) {
+                  const filtered = deps.filter(d => allIssueIds.has(d))
+                  if (filtered.length) cleanedIssueDeps[iid] = filtered
+                }
+              })
+              setIssueDeps(cleanedIssueDeps)
+
+              // Restore state filter (confirmStates logic)
+              if (savedStep >= 7 && selStates.size) {
+                const filtered = allIss.filter(i => selStates.has(i.state?.type))
+                setIssues(filtered)
+              } else {
+                setIssues(allIss)
+              }
+
+              // Jump to saved step (cap at 10 — step 11 recomputes plan automatically)
+              setStep(Math.min(savedStep, 10))
+              return
+            }
+          }
+        }
+      }
+    }
+
     setStep(1)
   }
 
@@ -341,32 +475,14 @@ export default function App() {
   const confirmStates = () => {
     const filtered = allIssues.filter(i => selStates.has(i.state?.type))
     setIssues(filtered)
-    setStep(7) // → Label & Estimate
-  }
-
-  const confirmLabelEstimate = () => {
-    // Check all issues have labels or member assignment
-    const unlabelled = issues.filter(i => {
-      const hasLabel = (i.labels?.nodes || []).length > 0 || !!issueLabels[i.id]
-      const assignVal = getAssign(i.id)
-      const hasAssignment = (!!assignVal && assignVal !== '__auto__') || (!assignVal && !!i.assignee?.id)
-      return !hasLabel && !hasAssignment
-    })
-    if (unlabelled.length) { setErr(unlabelled.length + ' issues still need labels (or a member assignment).'); return }
-    // Check all issues have estimates
-    const unest = issues.filter(i => !i.estimate || i.estimate <= 0)
-    if (unest.length) { setErr(unest.length + ' issues still need estimates.'); return }
-    // Clear saved issue order and rebuild from [N] prefix, then fix for dependencies
+    // Initialize issue order from [N] prefixes and fix for dependencies
     const om = { ...orderMap }
     if (init?.id) delete om[init.id]
-    // For each project, get the default order then sort to respect issue deps
     const newInitOrder = {}
     projects.forEach(proj => {
-      const projIssues = getOrdered(issues, proj.id, {}, null) // fresh [N]/default order
+      const projIssues = getOrdered(filtered, proj.id, {}, null)
       const sorted = [...projIssues]
-
-      // First: sort committed issues by their Linear cycle date
-      // (earlier cycle must come before later cycle)
+      // Sort committed issues by cycle date
       let changed = true
       while (changed) {
         changed = false
@@ -379,8 +495,7 @@ export default function App() {
           }
         }
       }
-
-      // Then: fix for issue dependencies (move deps before dependents)
+      // Fix for issue dependencies
       changed = true
       while (changed) {
         changed = false
@@ -398,15 +513,26 @@ export default function App() {
           if (changed) break
         }
       }
-
       newInitOrder[proj.id] = sorted.map(i => i.id)
     })
     om[init.id] = newInitOrder
     setOrderMap(om)
-    setErr(''); setStep(8) // → Order Issues
+    setStep(7) // → Configure Issues
   }
 
-  const confirmOrderIssues = () => {
+  const confirmConfigureIssues = () => {
+    const activeIssues = issues.filter(i => !excludedIssues.has(i.id))
+    // Check all active issues have labels or member assignment
+    const unlabelled = activeIssues.filter(i => {
+      const hasLabel = (i.labels?.nodes || []).length > 0 || !!issueLabels[i.id]
+      const assignVal = getAssign(i.id)
+      const hasAssignment = (!!assignVal && assignVal !== '__auto__') || (!assignVal && !!i.assignee?.id)
+      return !hasLabel && !hasAssignment
+    })
+    if (unlabelled.length) { setErr(unlabelled.length + ' issue' + (unlabelled.length !== 1 ? 's' : '') + ' still need labels (or a member assignment).'); return }
+    // Check all active issues have estimates
+    const unest = activeIssues.filter(i => !i.estimate || i.estimate <= 0)
+    if (unest.length) { setErr(unest.length + ' issue' + (unest.length !== 1 ? 's' : '') + ' still need estimates.'); return }
     // Rebuild labelMap from Linear data for the Labels > Team Members step
     const freshLabels = [...new Set(issues.flatMap(i => (i.labels?.nodes || []).map(l => l.name)))]
     const memberIds = new Set(members.map(m => m.id))
@@ -414,21 +540,22 @@ export default function App() {
     freshLabels.forEach(l => { lm[l] = (labelMap[l] || []).filter(mid => memberIds.has(mid)) })
     setLabelMap(lm)
     persist(snap({ labelMap: lm }))
-    setErr(''); setStep(9) // → Labels > Team Members
+    setErr(''); setStep(8) // → Labels > Team Members
   }
 
   const confirmLabelMap = () => {
     const empty = allLabels.filter(l => !(labelMap[l]?.length))
     if (empty.length) { setErr('Assign at least one member to: ' + empty.join(', ')); return }
-    setErr(''); setStep(10) // → Capacity
+    setErr(''); setStep(9) // → Capacity
   }
 
   // ── Plan ────────────────────────────────────────────────────────────────────
   const team = allTeams.find(t => t.id === selTeamId)
   const cycles = (team?.cycles?.nodes || []).slice().sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt))
 
-  const plan = step === 11 && init ? computePlan({
-    issues, projects, members, cycles, startIso,
+  const planIssues = excludedIssues.size ? issues.filter(i => !excludedIssues.has(i.id)) : issues
+  const plan = step === 10 && init ? computePlan({
+    issues: planIssues, projects, members, cycles, startIso,
     orderMap, initId: init.id, assignMap, caps,
     labelMap, issueLabels, projOrder, projDeps, issueDeps,
   }) : null
@@ -472,9 +599,10 @@ export default function App() {
 
       {/* Main */}
       <main ref={mainRef} style={{ flex: 1, overflowY: 'auto', padding: '40px 32px' }}>
-        <div style={{ maxWidth: step === 11 ? 'none' : 860, margin: '0 auto' }}>
+        <div style={{ maxWidth: step === 10 ? 'none' : 860, margin: '0 auto' }}>
 
-          {step === 0  && <StepConnect onConnected={onConnected} />}
+
+          {step === 0  && <StepConnect onConnected={onConnected} autoConnect={!!(loadStorage().step && localStorage.getItem('lp-apikey'))} />}
 
           {step === 1  && <StepTeam allTeams={allTeams} selTeamId={selTeamId} setSelTeamId={setSelTeamId} selMemberIds={selMemberIds} setSelMemberIds={setSelMemberIds} onNext={confirmTeam} onBack={() => setStep(0)} />}
 
@@ -495,37 +623,35 @@ export default function App() {
 
           {step === 6  && <StepStates issues={allIssues} selStates={selStates} setSelStates={setSelStates} onNext={confirmStates} onBack={() => setStep(5)} />}
 
-          {step === 7  && <StepLabelEstimate
-            issues={issues} chosenInits={chosenInits} projOrder={projOrder} projects={projects}
-            orderMap={orderMap} initId={init?.id}
-            issueLabels={issueLabels} setIssueLabel={setIssueLabel} availableLabels={availableLabels}
-            setEst={setEst} members={members} getAssign={getAssign} setAssign={setAssign}
-            err={err}
-            onNext={confirmLabelEstimate} onBack={() => setStep(6)}
-          />}
-
-          {step === 8  && <StepOrderIssues
+          {step === 7  && <StepConfigureIssues
             chosenInits={chosenInits} projects={projects} issues={issues}
             projOrder={projOrder}
             orderMap={orderMap} initId={init?.id}
-            issueLabels={issueLabels} availableLabels={availableLabels}
-            issueDeps={issueDeps} setIssueDepsFor={setIssueDepsFor}
-            saveOrder={saveOrder} startIso={startIso}
-            onNext={confirmOrderIssues} onBack={() => setStep(7)}
+            issueLabels={issueLabels} setIssueLabel={setIssueLabel} availableLabels={availableLabels}
+            setEst={setEst} members={members} getAssign={getAssign} setAssign={setAssign}
+            cycles={cycles} setCycle={setCycle}
+            issueDeps={issueDeps} linearDepsSet={linearDepsSet} crossProjectDeps={crossProjectDeps}
+            setIssueDepsFor={setIssueDepsFor}
+            setTitle={setTitle}
+            saveOrder={saveOrder} startIso={startIso} trackEdit={trackEdit}
+            edits={edits} setEdits={setEdits} apiKey={apiKey}
+            excludedIssues={excludedIssues} setExcludedIssues={setExcludedIssues}
+            err={err}
+            onNext={confirmConfigureIssues} onBack={() => setStep(6)}
           />}
 
-          {step === 9  && <StepLabelMap labels={allLabels} members={members} labelMap={labelMap} issues={issues} toggleLabelMember={toggleLabelMember} err={err} onNext={confirmLabelMap} onBack={() => setStep(8)} />}
+          {step === 8  && <StepLabelMap labels={allLabels} members={members} labelMap={labelMap} issues={issues} toggleLabelMember={toggleLabelMember} err={err} onNext={confirmLabelMap} onBack={() => setStep(7)} />}
 
-          {step === 10 && <StepCapacity members={members} getCap={getCap} setCap={setCap} onNext={() => setStep(11)} onBack={() => setStep(9)} />}
+          {step === 9  && <StepCapacity members={members} getCap={getCap} setCap={setCap} onNext={() => setStep(10)} onBack={() => setStep(8)} />}
 
-          {step === 11 && plan && (
+          {step === 10 && plan && (
             <PlanView
               issues={issues} projects={projects} members={members}
               plan={plan} getCap={getCap}
               chosenInits={chosenInits} projOrder={projOrder}
               orderMap={orderMap} initId={init?.id} issueLabels={issueLabels}
               teamName={team?.name || 'Team'}
-              onBack={() => setStep(10)}
+              onBack={() => setStep(9)}
             />
           )}
 
