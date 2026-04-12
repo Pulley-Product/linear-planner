@@ -6,6 +6,7 @@ import { getOrdered } from '../utils/plan.js'
 export function StepTeam({ allTeams, selTeamId, setSelTeamId, selMemberIds, setSelMemberIds, onNext, onBack }) {
   const selTeam = allTeams.find(t => t.id === selTeamId)
   const teamMembers = selTeam?.members?.nodes || []
+  const [showAllTeams, setShowAllTeams] = useState(false)
 
   const toggleMember = (mid) => {
     const ns = new Set(selMemberIds)
@@ -15,27 +16,47 @@ export function StepTeam({ allTeams, selTeamId, setSelTeamId, selMemberIds, setS
 
   return (
     <div>
-      <H1>Pick a Team & Select <R>Members</R></H1>
+      <H1>Pick a <R>Team</R> & Select <R>Members</R></H1>
       <Sub>Select the team whose members and cycles will be used for this plan. Uncheck members who should not be assigned issues.</Sub>
+      <Row>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <Btn onClick={onNext} disabled={!selTeamId || !selMemberIds.size}>Confirm Team & Members →</Btn>
+      </Row>
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <Card>
-            {[...allTeams].sort((a, b) => a.name.localeCompare(b.name)).map(t => (
-              <div key={t.id} onClick={() => {
-                setSelTeamId(t.id)
-                const mids = new Set((t.members?.nodes || []).map(m => m.id))
-                setSelMemberIds(mids)
-              }} style={pickRowStyle(selTeamId === t.id)}>
-                <Radio checked={selTeamId === t.id} />
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{t.name}</div>
-                  <div style={{ fontSize: 11, color: '#9a9a9e', fontFamily: 'monospace', marginTop: 2 }}>
-                    {t.members?.nodes?.length || 0} members ·{' '}
-                    {t.cycles?.nodes?.length || 0} active/upcoming cycles
+            {(() => {
+              const priorityNames = ['App Team 1', 'App Team 2', 'AI Team 1', 'AI Team 2', 'Platform']
+              const popular = priorityNames.map(n => allTeams.find(t => t.name === n)).filter(Boolean)
+              const all = [...allTeams].sort((a, b) => a.name.localeCompare(b.name))
+              const renderTeam = (t) => (
+                <div key={t.id} onClick={() => {
+                  setSelTeamId(t.id)
+                  const mids = new Set((t.members?.nodes || []).map(m => m.id))
+                  setSelMemberIds(mids)
+                }} style={pickRowStyle(selTeamId === t.id)}>
+                  <Radio checked={selTeamId === t.id} />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{t.name}</div>
+                    <div style={{ fontSize: 11, color: '#9a9a9e', fontFamily: 'monospace', marginTop: 2 }}>
+                      {t.members?.nodes?.length || 0} members &middot;{' '}
+                      {t.cycles?.nodes?.length || 0} active/upcoming cycles
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+              return <>
+                {popular.length > 0 && <>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 12px 6px', fontFamily: 'monospace' }}>Popular Teams</div>
+                  {popular.map(renderTeam)}
+                  <div onClick={() => setShowAllTeams(p => !p)} style={{ fontSize: 10, fontWeight: 700, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '12px 12px 6px', fontFamily: 'monospace', borderTop: '1px solid #e8e7e3', marginTop: 8, cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 8, transition: 'transform 0.15s', transform: showAllTeams ? 'rotate(0deg)' : 'rotate(-90deg)' }}>&#9660;</span>
+                    All Teams ({all.length})
+                  </div>
+                </>}
+                {showAllTeams && all.map(renderTeam)}
+              </>
+            })()}
           </Card>
         </div>
 
@@ -86,6 +107,10 @@ export function StepCycle({ cycles, selCycleId, setSelCycleId, err, onNext, onBa
     <div>
       <H1>Pick <R>Start Cycle</R></H1>
       <Sub>The plan starts at the beginning of this cycle. Week 1 = first week of the selected cycle.</Sub>
+      <Row>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <Btn onClick={onNext} disabled={!selCycleId}>Confirm Start Cycle →</Btn>
+      </Row>
       <Card>
         {cycles.length === 0 && (
           <p style={{ color: '#9a9a9e', fontFamily: 'monospace', fontSize: 13 }}>
@@ -160,6 +185,10 @@ export function StepInitiatives({ allInits, selInits, setSelInits, onNext, onBac
     <div>
       <H1>Select <R>Initiatives</R></H1>
       <Sub>Pick which initiatives to include. This determines which projects are available in the next step.</Sub>
+      <Row>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <Btn onClick={onNext} disabled={!selInits.size}>Next →</Btn>
+      </Row>
       <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search initiatives..."
         style={{ ...inpS, marginBottom: 12, width: '100%' }} />
 
@@ -277,6 +306,16 @@ export function StepProjects({ allInits, selInits, selProjects, setSelProjects, 
     <div>
       <H1>Select <R>Projects</R></H1>
       <Sub>Pick which projects to include from the selected initiatives. Check an initiative name to select all its projects.</Sub>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 20 }}>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <GBtn onClick={() => setSelProjects(new Set(allProjIds))}>All</GBtn>
+          <GBtn onClick={() => setSelProjects(new Set())}>None</GBtn>
+          <Btn onClick={onNext} disabled={!selProjects.size}>
+            Load {selProjects.size} Project{selProjects.size !== 1 ? 's' : ''} →
+          </Btn>
+        </div>
+      </div>
       <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search projects or initiatives..."
         style={{ ...inpS, marginBottom: 12, width: '100%' }} />
 
@@ -319,14 +358,16 @@ export function StepProjects({ allInits, selInits, selProjects, setSelProjects, 
         )
       })}
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-        <Btn onClick={onNext} disabled={!selProjects.size}>
-          Load {selProjects.size} Project{selProjects.size !== 1 ? 's' : ''} →
-        </Btn>
-        <GBtn onClick={() => setSelProjects(new Set(allProjIds))}>All</GBtn>
-        <GBtn onClick={() => setSelProjects(new Set())}>None</GBtn>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 20 }}>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <GBtn onClick={() => setSelProjects(new Set(allProjIds))}>All</GBtn>
+          <GBtn onClick={() => setSelProjects(new Set())}>None</GBtn>
+          <Btn onClick={onNext} disabled={!selProjects.size}>
+            Load {selProjects.size} Project{selProjects.size !== 1 ? 's' : ''} →
+          </Btn>
+        </div>
       </div>
-      <Row><GBtn onClick={onBack}>← Back</GBtn></Row>
     </div>
   )
 }
@@ -352,6 +393,10 @@ export function StepStates({ issues, selStates, setSelStates, onNext, onBack }) 
     <div>
       <H1>Select <R>Issue States</R></H1>
       <Sub>Pick which issue states to include in the plan. Unselected states will be excluded.</Sub>
+      <Row>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <Btn onClick={onNext} disabled={!selStates.size}>Next →</Btn>
+      </Row>
       <Card>
         {stateTypes.map(t => {
           const sel = selStates.has(t)
@@ -399,11 +444,11 @@ export function StepLabelMap({ labels, members, labelMap, issues, toggleLabelMem
   const usedLabels = labels.filter(l => issues.some(i => (i.labels?.nodes || []).some(ll => ll.name === l)))
   const unusedLabels = labels.filter(l => !usedLabels.includes(l))
 
-  const MW = 60 // member column width
+  const MW = 90 // member column width
 
   const renderLabelGrid = (labelList) => (
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table style={{ width: 170 + MW * members.length, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
             <th style={{ width: 170, padding: '8px 0', textAlign: 'left', fontSize: 10, color: '#9a9a9e', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: '1px solid #dddcd5' }}>Label</th>
@@ -428,25 +473,25 @@ export function StepLabelMap({ labels, members, labelMap, issues, toggleLabelMem
             const col = issues.flatMap(i => i.labels?.nodes || []).find(l => l.name === label)?.color
             return (
               <tr key={label} style={{ borderBottom: '1px solid #f0efe9' }}>
-                <td style={{ padding: '7px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: col ? `#${col}` : '#9a9a9e', flexShrink: 0, display: 'inline-block' }} />
-                  <span style={{ fontWeight: 500, fontSize: 13 }}>{label}</span>
-                  <span style={{ fontSize: 10, color: '#9a9a9e', fontFamily: 'monospace' }}>{cnt}i</span>
+                <td style={{ padding: '7px 0' }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: col ? `#${col}` : '#9a9a9e', display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }} />
+                  <span style={{ fontWeight: 500, fontSize: 13, verticalAlign: 'middle' }}>{label}</span>
+                  <span style={{ fontSize: 10, color: '#9a9a9e', fontFamily: 'monospace', verticalAlign: 'middle', marginLeft: 6 }}>{cnt}i</span>
                 </td>
                 {members.map((m, mi) => {
                   const checked = (labelMap[label] || []).includes(m.id)
                   return (
-                    <td key={m.id} style={{ width: MW, textAlign: 'center', padding: '3px 0' }}>
+                    <td key={m.id} style={{ width: MW, textAlign: 'center', verticalAlign: 'middle', padding: '3px 0' }}>
                       <div onClick={() => toggleLabelMember(label, m.id)}
                         style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                         <div style={{
-                          width: 17, height: 17, borderRadius: 4,
+                          width: 17, height: 17, borderRadius: 4, boxSizing: 'border-box',
                           border: `2px solid ${checked ? AV_FG[mi % AV_FG.length] : '#dddcd5'}`,
                           background: checked ? AV_BG[mi % AV_BG.length] : 'white',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 10, color: AV_FG[mi % AV_FG.length], transition: 'all 0.12s',
+                          fontSize: 10, lineHeight: 1, color: AV_FG[mi % AV_FG.length], transition: 'all 0.12s',
                         }}>
-                          {checked ? '✓' : ''}
+                          {checked ? '✓' : '\u00A0'}
                         </div>
                       </div>
                     </td>
@@ -464,6 +509,7 @@ export function StepLabelMap({ labels, members, labelMap, issues, toggleLabelMem
     <div>
       <H1>Assign <R>Issue Labels</R> to <R>Team Members</R></H1>
       <Sub>Tick which team members can work on each label. Members can cover multiple labels.</Sub>
+      <Row><GBtn onClick={onBack}>← Back</GBtn><Btn onClick={onNext}>Next →</Btn></Row>
 
       {usedLabels.length > 0 && (
         <Card>{renderLabelGrid(usedLabels)}</Card>
@@ -570,6 +616,11 @@ export function StepProjOrder({ projects, issues, chosenInits, projOrder, setPro
     <div>
       <H1>Determine <R>Project Priority</R></H1>
       <Sub>Drag projects into priority order. #1 gets first pick of capacity. Click "depends on completion of" to set hard dependencies.</Sub>
+      <Row><GBtn onClick={onBack}>← Back</GBtn><Btn onClick={() => {
+        const err = validateOrder(projOrder)
+        if (err) setDropError(err)
+        else onNext()
+      }}>Next →</Btn></Row>
       <div
         onDragOver={e => {
           e.preventDefault(); e.dataTransfer.dropEffect = 'move'
@@ -605,11 +656,20 @@ export function StepProjOrder({ projects, issues, chosenInits, projOrder, setPro
                     ))}
                   </div>
                 </div>
-                <div onMouseDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); setModalProjId(proj.id) }}
-                  style={{ flexShrink: 0, cursor: 'pointer', textAlign: 'right', maxWidth: 180 }}>
-                  <div style={{ fontSize: 9, fontFamily: 'monospace', color: deps.length ? '#e63946' : '#c8c7be', whiteSpace: 'nowrap' }}>depends on completion of</div>
-                  <div style={{ fontSize: 10, fontFamily: 'monospace', marginTop: 1, color: deps.length ? '#1a1a2e' : '#c8c7be', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{deps.length ? depNames.join(', ') : 'none'}</div>
-                </div>
+                <button type="button"
+                  onMouseDown={e => e.stopPropagation()}
+                  onDragStart={e => { e.preventDefault(); e.stopPropagation() }}
+                  draggable={false}
+                  onClick={e => { e.stopPropagation(); setModalProjId(proj.id) }}
+                  style={{
+                    ...inpS, padding: '3px 8px', fontSize: 10, fontFamily: 'monospace', flexShrink: 0,
+                    cursor: 'pointer', whiteSpace: 'nowrap', width: 70, textAlign: 'center',
+                    background: deps.length ? 'rgba(45,106,79,0.08)' : '#f9f9f7',
+                    borderColor: deps.length ? 'rgba(45,106,79,0.3)' : '#dddcd5',
+                    color: deps.length ? '#2d6a4f' : '#9a9a9e',
+                  }}>
+                  {deps.length ? `${deps.length} dep${deps.length > 1 ? 's' : ''}` : 'no deps'}
+                </button>
                 <div style={{ color: '#c8c7be', fontSize: 14, cursor: 'grab', padding: '0 4px' }}>⠿</div>
               </div>
               {showAfter && <div style={{ height: 3, background: '#e63946', borderRadius: 2, margin: '4px 0' }} />}
@@ -627,8 +687,7 @@ export function StepProjOrder({ projects, issues, chosenInits, projOrder, setPro
         <div onClick={() => setModalProjId(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(26,26,46,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div onClick={e => e.stopPropagation()} style={{ background: 'white', borderRadius: 12, padding: 24, width: 420, maxHeight: '70vh', overflowY: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,0.2)', border: '1px solid #e8e7e3' }}>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Depends on completion of</div>
-            <div style={{ fontSize: 11, color: '#9a9a9e', fontFamily: 'monospace', marginBottom: 4 }}>{fullName(modalProjId)}</div>
-            <div style={{ fontSize: 11, color: '#9a9a9e', marginBottom: 16 }}>Select projects that must finish before this one can start.</div>
+            <div style={{ fontSize: 11, color: '#9a9a9e', marginBottom: 16 }}>Select projects that must finish before <strong>{fullName(modalProjId)}</strong> can start.</div>
             {modalOthers.map(op => {
               const checked = modalDeps.includes(op.id)
               const circular = !checked && wouldCreateCycle(modalProjId, op.id)

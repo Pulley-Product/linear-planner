@@ -152,21 +152,18 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
     // SECTION 1: Member allocation
     // ══════════════════════════════════════════════════════════════════════
 
-    // Row 1: Header
     const allocHeaderRow = ws.addRow(['', '', '', '', 'TEAM MEMBER ALLOCATION', ...displayCycles.map(c => cycleLabel(c)), 'TOTAL'])
     allocHeaderRow.eachCell((cell, ci) => {
       if (ci >= memberColIdx) Object.assign(cell, darkHeader)
       cell.border = thinBorder
     })
 
-    // Row 2: Dates
     const dateRow = ws.addRow(['', '', '', '', '', ...displayCycles.map(c => cycleDates(c)), ''])
     dateRow.eachCell((cell, ci) => {
       if (ci >= memberColIdx) { cell.font = { size: 8, color: { argb: 'FF9A9A9E' } }; cell.alignment = { horizontal: 'center' } }
       cell.border = thinBorder
     })
 
-    // Member rows with SUMIF formulas
     const memberStartXlRow = ws.rowCount + 1
     const activeMems = mems.filter(m => Object.keys(memberCyclePts[m.id] || {}).length > 0)
     activeMems.forEach(m => {
@@ -174,7 +171,6 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
       row.eachCell((cell) => { Object.assign(cell, memberStyle); cell.border = thinBorder })
       row.getCell(memberColIdx).font = { bold: true, size: 11 }
       row.getCell(4).font = { size: 8, italic: true, color: { argb: 'FF9A9A9E' } }
-      // Cycle + total cells are placeholders — formulas injected after issue rows
       for (let c = 0; c < numCols; c++) {
         const cell = row.getCell(firstCycCol + c)
         Object.assign(cell, memberNumStyle)
@@ -185,21 +181,18 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
       totalCell.border = thinBorder
     })
 
-    // Blank separator
     ws.addRow([])
 
     // ══════════════════════════════════════════════════════════════════════
-    // SECTION 2: Issue data
+    // SECTION 3: Issue data
     // ══════════════════════════════════════════════════════════════════════
 
-    // Issue column headers
     const issueHeaderXlRow = ws.rowCount + 1
-    const ihRow = ws.addRow(['ID', 'Issue', 'Estimate', 'Label', 'Team Member', ...displayCycles.map(c => cycleLabel(c)), 'Total'])
+    const ihRow = ws.addRow(['ID', 'Issue', 'Est', 'Label', 'Member', ...displayCycles.map(c => cycleLabel(c)), 'Total'])
     ihRow.eachCell((cell) => { Object.assign(cell, darkHeader); cell.border = thinBorder })
 
     const issueDataStartXlRow = ws.rowCount + 1
 
-    // Project color index for alternating project backgrounds
     let projIdx = 0
     const projBgColors = ['FFEEF2FF', 'FFECFDF5', 'FFFEFCE8', 'FFFEF2F2', 'FFF5F3FF', 'FFECFEFF', 'FFFFF7ED', 'FFFDF2F8']
 
@@ -213,36 +206,24 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
         const colorArgb = 'FF' + color.replace('#', '')
         projIdx++
 
-        // Project header row
         const phRow = ws.addRow([`${init.name} >> ${proj.name}`, '', '', '', '', ...displayCycles.map(() => ''), ''])
         ws.mergeCells(phRow.number, 1, phRow.number, totalColIdx)
         phRow.getCell(1).font = { bold: true, size: 11, color: { argb: colorArgb } }
         phRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } }
-        phRow.getCell(1).border = thinBorder
         phRow.eachCell((cell) => { cell.border = thinBorder })
 
-        // Issue rows
         projIssues.forEach((issue, idx) => {
           const info = issueInfo(issue.id)
           const linearLabel = (issue.labels?.nodes || [])[0]?.name || ''
           const label = issueLabels[issue.id] || linearLabel
-          const rowData = [
-            issue.identifier,
-            issue.title,
-            issue.estimate || '',
-            label,
-            info.member?.name || '',
-          ]
+          const rowData = [issue.identifier, issue.title, issue.estimate || '', label, info.member?.name || '']
           displayCycles.forEach((_, ci) => {
             const split = info.splits.find(s => s.ci - startCI === ci)
             rowData.push(split ? split.pts : '')
           })
-          rowData.push('') // Total placeholder
+          rowData.push('')
 
           const iRow = ws.addRow(rowData)
-
-          // Alternate row shading within project
-          const rowBg = idx % 2 === 0 ? 'FFFFFFFF' : 'FFFAFAF9'
           iRow.eachCell((cell, ci) => {
             cell.border = thinBorder
             cell.font = { size: 10 }
@@ -252,7 +233,6 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
           iRow.getCell(3).font = { size: 10, bold: true }
           iRow.getCell(3).alignment = { horizontal: 'center' }
 
-          // Color cycle cells that have values
           displayCycles.forEach((_, ci) => {
             const cell = iRow.getCell(firstCycCol + ci)
             if (cell.value) {
@@ -261,7 +241,6 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
             }
           })
 
-          // Total formula
           const firstCyc = colLetter(firstCycCol - 1)
           const lastCyc = colLetter(firstCycCol + numCols - 2)
           iRow.getCell(totalColIdx).value = { formula: `SUM(${firstCyc}${iRow.number}:${lastCyc}${iRow.number})` }
@@ -292,12 +271,66 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
     })
 
     // ══════════════════════════════════════════════════════════════════════
-    // SECTION 3: Verification
+    // SECTION 3: Forward Plan Summary
+    // ══════════════════════════════════════════════════════════════════════
+
+    ws.addRow([])
+    const summaryTitleRow = ws.addRow(['FORWARD PLAN SUMMARY'])
+    summaryTitleRow.getCell(1).font = { bold: true, size: 14, color: { argb: 'FF1A1A2E' } }
+    ws.mergeCells(summaryTitleRow.number, 1, summaryTitleRow.number, 5)
+
+    const summaryDateRow = ws.addRow([`Generated: ${new Date().toLocaleString()}`])
+    summaryDateRow.getCell(1).font = { size: 9, italic: true, color: { argb: 'FF9A9A9E' } }
+
+    ws.addRow([])
+
+    const sumHeaderRow = ws.addRow(['Initiative', 'Project', 'Planned End Cycle', 'Cycle End Date', 'Linear Target Date'])
+    sumHeaderRow.eachCell((cell) => {
+      cell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } }
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A2E' } }
+      cell.border = thinBorder
+    })
+
+    initGroups.forEach(({ init, projects: initProjs }) => {
+      const initIssues = sc.filter(s => initProjs.some(p => p.id === s.project?.id))
+      const initMaxCI = initIssues.length ? Math.max(...initIssues.map(s => s._ci)) - startCI : -1
+      const initEndCycle = initMaxCI >= 0 ? displayCycles[Math.min(initMaxCI, displayCycles.length - 1)] : null
+      const initRow = ws.addRow([
+        init.name, '',
+        initEndCycle ? cycleLabel(initEndCycle) : '–',
+        initEndCycle?.endsAt ? fmtD(initEndCycle.endsAt) : '–',
+        fmtD(init.targetDate),
+      ])
+      initRow.getCell(1).font = { bold: true, size: 11 }
+      initRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F7' } }
+      initRow.eachCell((cell) => { cell.border = thinBorder })
+
+      initProjs.forEach(proj => {
+        const pIss = sc.filter(s => s.project?.id === proj.id)
+        const pMaxCI = pIss.length ? Math.max(...pIss.map(s => s._ci)) - startCI : -1
+        const pEndCycle = pMaxCI >= 0 ? displayCycles[Math.min(pMaxCI, displayCycles.length - 1)] : null
+        const projData = (init.projects?.nodes || []).find(p => p.id === proj.id)
+        const pColor = projColor[proj.id] || '#5a5a72'
+        const pRow = ws.addRow([
+          '', proj.name,
+          pEndCycle ? cycleLabel(pEndCycle) : '–',
+          pEndCycle?.endsAt ? fmtD(pEndCycle.endsAt) : '–',
+          fmtD(projData?.targetDate),
+        ])
+        pRow.getCell(2).font = { size: 10, color: { argb: 'FF' + pColor.replace('#', '') } }
+        pRow.eachCell((cell) => { cell.border = thinBorder })
+      })
+    })
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SECTION 4: Verification (collapsed via row grouping)
     // ══════════════════════════════════════════════════════════════════════
     ws.addRow([])
+    ws.addRow([])
+    const verifyStartRow = ws.rowCount + 1
     const verifyTitleRow = ws.addRow(['VERIFICATION'])
-    verifyTitleRow.getCell(1).font = { bold: true, size: 12 }
-    const verifyExplainRow = ws.addRow(['This section checks that the SUMIF formulas in the member allocation table above match the values calculated by the Linear Planner app. "OK" (green) means they match. "MISMATCH" (red) means the formula result differs from the app — investigate if you see this.'])
+    verifyTitleRow.getCell(1).font = { bold: true, size: 12, color: { argb: 'FF9A9A9E' } }
+    const verifyExplainRow = ws.addRow(['Checks that SUMIF formulas in the member allocation table match the app calculations. "OK" = match, "MISMATCH" = investigate.'])
     ws.mergeCells(verifyExplainRow.number, 1, verifyExplainRow.number, totalColIdx)
     verifyExplainRow.getCell(1).font = { size: 9, italic: true, color: { argb: 'FF9A9A9E' } }
     verifyExplainRow.getCell(1).alignment = { wrapText: true }
@@ -308,7 +341,6 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
     activeMems.forEach((m, mi) => {
       const memberAllocXlRow = memberStartXlRow + mi
 
-      // Expected row
       const expRowData = ['', '', '', 'Expected', m.name]
       let expectedTotal = 0
       displayCycles.forEach((_, ci) => {
@@ -318,42 +350,27 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
       })
       expRowData.push(expectedTotal)
       const expRow = ws.addRow(expRowData)
-      expRow.eachCell((cell, ci) => {
-        cell.border = thinBorder
-        if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' }
-      })
+      expRow.eachCell((cell, ci) => { cell.border = thinBorder; if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' } })
       expRow.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF9A9A9E' } }
 
-      // Formula row
       const frmRow = ws.addRow(['', '', '', 'Formula', m.name])
       displayCycles.forEach((_, ci) => {
         const cycCol = colLetter(firstCycCol + ci - 1)
         frmRow.getCell(firstCycCol + ci).value = { formula: `${cycCol}${memberAllocXlRow}` }
       })
-      const firstCyc = colLetter(firstCycCol - 1)
-      const lastCyc = colLetter(firstCycCol + numCols - 2)
       frmRow.getCell(totalColIdx).value = { formula: `${colLetter(totalColIdx - 1)}${memberAllocXlRow}` }
-      frmRow.eachCell((cell, ci) => {
-        cell.border = thinBorder
-        if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' }
-      })
+      frmRow.eachCell((cell, ci) => { cell.border = thinBorder; if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' } })
       frmRow.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF9A9A9E' } }
 
-      // Check row — IF match green OK, else red MISMATCH
       const chkRow = ws.addRow(['', '', '', 'Check', m.name])
       displayCycles.forEach((_, ci) => {
         const cycCol = colLetter(firstCycCol + ci - 1)
-        const cell = chkRow.getCell(firstCycCol + ci)
-        cell.value = { formula: `IF(${cycCol}${expRow.number}=${cycCol}${frmRow.number},"OK","MISMATCH")` }
+        chkRow.getCell(firstCycCol + ci).value = { formula: `IF(${cycCol}${expRow.number}=${cycCol}${frmRow.number},"OK","MISMATCH")` }
       })
       chkRow.getCell(totalColIdx).value = { formula: `IF(${colLetter(totalColIdx - 1)}${expRow.number}=${colLetter(totalColIdx - 1)}${frmRow.number},"OK","MISMATCH")` }
-      chkRow.eachCell((cell, ci) => {
-        cell.border = thinBorder
-        if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' }
-      })
+      chkRow.eachCell((cell, ci) => { cell.border = thinBorder; if (ci >= firstCycCol) cell.alignment = { horizontal: 'center' } })
       chkRow.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF9A9A9E' } }
 
-      // Add conditional formatting for check cells
       for (let ci = 0; ci <= numCols; ci++) {
         const col = firstCycCol + ci
         const cellRef = `${colLetter(col - 1)}${chkRow.number}`
@@ -367,57 +384,13 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
       }
     })
 
-    // ══════════════════════════════════════════════════════════════════════
-    // SECTION 4: Summary — Initiative / Project end dates
-    // ══════════════════════════════════════════════════════════════════════
-
-    ws.addRow([])
-    const summaryTitleRow = ws.addRow(['FORWARD PLAN SUMMARY'])
-    summaryTitleRow.getCell(1).font = { bold: true, size: 14, color: { argb: 'FF1A1A2E' } }
-    ws.mergeCells(summaryTitleRow.number, 1, summaryTitleRow.number, 4)
-
-    const summaryDateRow = ws.addRow([`Generated: ${new Date().toLocaleString()}`])
-    summaryDateRow.getCell(1).font = { size: 9, italic: true, color: { argb: 'FF9A9A9E' } }
-
-    ws.addRow([])
-
-    const sumHeaderRow = ws.addRow(['Initiative / Project', 'Linear Target Date', 'Planned End Cycle', 'Planned End Date'])
-    sumHeaderRow.eachCell((cell) => {
-      cell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } }
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A2E' } }
-      cell.border = thinBorder
-    })
-
-    initGroups.forEach(({ init, projects: initProjs }) => {
-      const initIssues = sc.filter(s => initProjs.some(p => p.id === s.project?.id))
-      const initMaxCI = initIssues.length ? Math.max(...initIssues.map(s => s._ci)) - startCI : -1
-      const initEndCycle = initMaxCI >= 0 ? displayCycles[Math.min(initMaxCI, displayCycles.length - 1)] : null
-      const initRow = ws.addRow([
-        init.name,
-        fmtD(init.targetDate),
-        initEndCycle ? cycleLabel(initEndCycle) : '–',
-        initEndCycle?.endsAt ? fmtD(initEndCycle.endsAt) : '–',
-      ])
-      initRow.getCell(1).font = { bold: true, size: 11 }
-      initRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F7' } }
-      initRow.eachCell((cell) => { cell.border = thinBorder })
-
-      initProjs.forEach(proj => {
-        const pIss = sc.filter(s => s.project?.id === proj.id)
-        const pMaxCI = pIss.length ? Math.max(...pIss.map(s => s._ci)) - startCI : -1
-        const pEndCycle = pMaxCI >= 0 ? displayCycles[Math.min(pMaxCI, displayCycles.length - 1)] : null
-        const projData = (init.projects?.nodes || []).find(p => p.id === proj.id)
-        const pRow = ws.addRow([
-          `    ${proj.name}`,
-          fmtD(projData?.targetDate),
-          pEndCycle ? cycleLabel(pEndCycle) : '–',
-          pEndCycle?.endsAt ? fmtD(pEndCycle.endsAt) : '–',
-        ])
-        const pColor = projColor[proj.id] || '#5a5a72'
-        pRow.getCell(1).font = { size: 10, color: { argb: 'FF' + pColor.replace('#', '') } }
-        pRow.eachCell((cell) => { cell.border = thinBorder })
-      })
-    })
+    // ── Group verification rows (collapsed by default) ──
+    const verifyEndRow = ws.rowCount
+    for (let r = verifyStartRow; r <= verifyEndRow; r++) {
+      ws.getRow(r).outlineLevel = 1
+      ws.getRow(r).hidden = true
+    }
+    ws.properties.outlineLevelRow = 1
 
     // ── Freeze panes ──
     ws.views = [{ state: 'frozen', xSplit: 5, ySplit: issueHeaderXlRow }]
@@ -436,6 +409,10 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
       <h1 style={{ fontWeight: 800, fontSize: 26, letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 6 }}>
         Forward <span style={{ color: '#e63946' }}>Plan</span>
       </h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 20, marginBottom: 20 }}>
+        <GBtn onClick={onBack}>&#8592; Back</GBtn>
+        <Btn onClick={downloadXlsx}>Download .xlsx</Btn>
+      </div>
       {/* Algorithm explanation — collapsible */}
       <div style={{ marginBottom: 16 }}>
         <div onClick={() => setShowAlgo(!showAlgo)} style={{
@@ -456,7 +433,7 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
 
             <div style={{ fontWeight: 600, color: '#1a1a2e', marginBottom: 4 }}>First: lock in what's already committed</div>
             <p style={{ margin: '0 0 12px', lineHeight: 1.8 }}>
-              Before scheduling any new work, the planner looks at all issues that are already assigned to a cycle in Linear — things like PTO, on-call shifts, holidays, and in-progress work. These are placed first (shown with diagonal stripes in the table below). This blocks out each person's capacity so the planner knows what time is actually available. Any issues committed to cycles before your selected start cycle are ignored.
+              Before scheduling any new work, the planner looks at all issues that are already assigned to a cycle in Linear — things like PTO, on-call shifts, holidays, and in-progress work. These are placed first, blocking out each person's capacity so the planner knows what time is actually available. Any issues committed to cycles before your selected start cycle are ignored.
             </p>
 
             <div style={{ fontWeight: 600, color: '#1a1a2e', marginBottom: 4 }}>Then: schedule everything else</div>
@@ -538,9 +515,9 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
           <thead>
             <tr style={{ background: '#f5f4f0' }}>
               <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Initiative / Project</th>
-              <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Linear Target Date</th>
               <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Planned End Cycle</th>
-              <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Planned End Date</th>
+              <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Cycle End Date</th>
+              <th style={{ padding: '8px 12px', textAlign: 'left', fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #dddcd5' }}>Linear Target Date</th>
             </tr>
           </thead>
           <tbody>
@@ -552,14 +529,14 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
               return [
                 <tr key={`init-${init.id}`} style={{ background: '#f9f9f7' }}>
                   <td style={{ padding: '8px 12px', fontWeight: 700, fontSize: 13 }}>{init.name}</td>
-                  <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
-                    {init.targetDate ? new Date(init.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
-                  </td>
                   <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>
                     {initEndCycle ? cycleLabel(initEndCycle) : '–'}
                   </td>
                   <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
                     {initEndCycle?.endsAt ? new Date(initEndCycle.endsAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
+                  </td>
+                  <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
+                    {init.targetDate ? new Date(init.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
                   </td>
                 </tr>,
                 ...initProjs.map(proj => {
@@ -574,14 +551,14 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
                         <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: projColor[proj.id], marginRight: 8, verticalAlign: 'middle' }} />
                         {proj.name}
                       </td>
-                      <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
-                        {projData?.targetDate ? new Date(projData.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
-                      </td>
                       <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontSize: 11 }}>
                         {pEndCycle ? cycleLabel(pEndCycle) : '–'}
                       </td>
                       <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
                         {pEndCycle?.endsAt ? new Date(pEndCycle.endsAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
+                      </td>
+                      <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontSize: 11, color: '#5a5a72' }}>
+                        {projData?.targetDate ? new Date(projData.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '–'}
                       </td>
                     </tr>
                   )
@@ -592,8 +569,8 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
         </table>
       </div>
 
-      {/* Combined scrollable area: member allocation + issue spreadsheet */}
-      <div style={{ overflowX: 'auto', marginBottom: 20, paddingBottom: 16 }}>
+      {/* Combined scrollable area */}
+      <div style={{ overflowX: 'auto', marginBottom: 20 }}>
         <div style={{ minWidth: FIXED_W + COL_W * numCols }}>
 
           {/* Per-member allocation table */}
@@ -640,17 +617,6 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
             </tbody>
           </table>
 
-          {/* Legend for diagonal stripes */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, fontSize: 11, color: '#9a9a9e' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 20, height: 14, borderRadius: 3, background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)' }} />
-              <span>Scheduled by planner</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 20, height: 14, borderRadius: 3, background: 'repeating-linear-gradient(135deg, rgba(59,130,246,0.22), rgba(59,130,246,0.22) 4px, rgba(59,130,246,0.08) 4px, rgba(59,130,246,0.08) 8px)', border: '1px solid rgba(59,130,246,0.3)' }} />
-              <span>Committed in Linear (assigned to a cycle)</span>
-            </div>
-          </div>
 
           {/* Issue spreadsheet table */}
           <table style={{ width: FIXED_W + COL_W * numCols, tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 11 }}>
@@ -705,14 +671,11 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
                           <td style={{ padding: '5px 10px', fontSize: 11, color: '#5a5a72', whiteSpace: 'nowrap' }}>{info.member?.name || '–'}</td>
                           {displayCycles.map((_, ci) => {
                             const split = info.splits.find(s => s.ci - startCI === ci)
-                            const committedBg = split && info.committed
-                              ? `repeating-linear-gradient(135deg, ${color}35, ${color}35 4px, ${color}15 4px, ${color}15 8px)`
-                              : undefined
                             return (
                               <td key={ci} style={{
                                 padding: '5px 8px', textAlign: 'center', fontFamily: 'monospace', fontSize: 11, fontWeight: 600,
                                 borderLeft: '1px solid #f0efe9',
-                                background: committedBg || (split ? `${color}18` : 'transparent'),
+                                background: split ? `${color}18` : 'transparent',
                                 color: split ? color : '#dddcd5',
                               }}>
                                 {split ? split.pts : ''}
@@ -732,7 +695,7 @@ export default function PlanView({ issues, projects, members, plan, getCap, chos
 
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 20 }}>
-        <GBtn onClick={onBack}>← Capacity</GBtn>
+        <GBtn onClick={onBack}>&#8592; Back</GBtn>
         <Btn onClick={downloadXlsx}>Download .xlsx</Btn>
       </div>
     </div>

@@ -119,6 +119,10 @@ export function StepCapacity({ members, getCap, setCap, onNext, onBack }) {
     <div>
       <H1>Team <R>Capacity</R></H1>
       <Sub>Story points each person can complete per cycle.</Sub>
+      <Row>
+        <GBtn onClick={onBack}>← Back</GBtn>
+        <Btn onClick={onNext} danger>Generate Plan →</Btn>
+      </Row>
       <Card>
         {members.map((m, i) => (
           <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#f0efe9', border: '1.5px solid #dddcd5', borderRadius: 8, padding: '11px 14px', marginBottom: 8 }}>
