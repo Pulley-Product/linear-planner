@@ -645,16 +645,8 @@ export function StepProjOrder({ projects, issues, chosenInits, projOrder, setPro
                 style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', marginBottom: 6, background: 'white', border: '1.5px solid #e8e7e3', borderRadius: 8, cursor: 'grab', opacity: dragIdx === i ? 0.4 : 1 }}>
                 <div style={{ width: 26, height: 26, borderRadius: 6, flexShrink: 0, background: '#1a1a2e', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, fontFamily: 'monospace' }}>{i + 1}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13 }}>
-                    <span style={{ fontWeight: 400, color: '#9a9a9e' }}>{projInitName[proj.id] || 'Unknown'}</span>
-                    <span style={{ color: '#c8c7be', margin: '0 5px' }}>&gt;&gt;</span>
-                    <span style={{ fontWeight: 600 }}>{proj.name}</span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
-                    {stateCounts(proj.id).map(({ name, count }) => (
-                      <span key={name} style={{ fontSize: 9, color: '#9a9a9e', fontFamily: 'monospace', background: '#f0efe9', padding: '1px 6px', borderRadius: 3 }}>{count} {name.toLowerCase()}</span>
-                    ))}
-                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 400, color: '#9a9a9e' }}>{projInitName[proj.id] || 'Unknown'}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{proj.name}</div>
                 </div>
                 <button type="button"
                   onMouseDown={e => e.stopPropagation()}
