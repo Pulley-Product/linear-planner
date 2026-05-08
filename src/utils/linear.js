@@ -55,7 +55,7 @@ const ISSUE_FIELDS = `
   id identifier title estimate
   assignee { id name }
   project { id name }
-  state { name type }
+  state { id name type }
   labels { nodes { id name color } }
   cycle { id startsAt endsAt number }
   relations { nodes { id type relatedIssue { id } } }
@@ -77,6 +77,15 @@ export function buildIssueQuery(stateType) {
 }
 
 // ── Mutations ────────────────────────────────────────────────────────────────
+
+export function buildIssueCreateMutation() {
+  return `mutation IssueCreate($input: IssueCreateInput!) {
+    issueCreate(input: $input) {
+      success
+      issue { id identifier title estimate }
+    }
+  }`
+}
 
 export function buildIssueUpdateMutation() {
   return `mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {

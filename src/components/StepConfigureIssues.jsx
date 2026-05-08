@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Btn, GBtn, Check, Row, H1, R, Sub, Err, Card, inpS } from './ui.jsx'
 import { getOrdered } from '../utils/plan.js'
-import { linearQuery, buildIssueUpdateMutation, buildRelationCreateMutation, buildRelationDeleteMutation } from '../utils/linear.js'
+import { linearQuery, buildIssueCreateMutation, buildIssueUpdateMutation, buildRelationCreateMutation, buildRelationDeleteMutation } from '../utils/linear.js'
 
 // Small "was:" indicator for changed fields
 function Was({ text }) {
@@ -14,7 +14,7 @@ function IssueRow({
   issue, idx, displayLabel, isDragging, isExcluded, issueLabels, setIssueLabel, availableLabels,
   setEst, setTitle, members, getAssign, setAssign, cycles, setCycle,
   deps, linearDepsSet, onOpenDepModal, trackEdit, issueEdits,
-  isSelected, onToggleSelect,
+  isSelected, onToggleSelect, removeIssue,
 }) {
   const linearLabel = (issue.labels?.nodes || [])[0]?.name || ''
   const effectiveLabel = issueLabels[issue.id] || linearLabel
@@ -85,6 +85,7 @@ function IssueRow({
     if (!origId) return '—'
     return issueEdits.assignee.originalName || members.find(m => m.id === origId)?.name || '—'
   })() : null
+  const wasParent = issueEdits?.parent ? (issueEdits.parent.original ? 'had parent' : 'no parent') : null
 
   // Consistent control styling
   const ctrlStyle = (hasValue, isMandatoryMissing) => ({
@@ -97,7 +98,7 @@ function IssueRow({
   return (
     <div
       style={{
-        display: 'flex', alignItems: 'flex-start', gap: 7,
+        display: 'flex', alignItems: 'flex-start', gap: 14,
         background: isExcluded ? '#f5f4f0' : 'white',
         border: `1.5px solid ${isExcluded ? '#e8e7e3' : '#e8e7e3'}`,
         borderRadius: 8, padding: '7px 10px',
@@ -124,24 +125,25 @@ function IssueRow({
       <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#9a9a9e', minWidth: 20, textAlign: 'center', flexShrink: 0, marginTop: 3 }}>{displayLabel || idx + 1}</span>
 
       {/* Identifier */}
-      <span style={{ fontFamily: 'monospace', fontSize: 10, background: '#f0efe9', color: '#9a9a9e', padding: '2px 5px', borderRadius: 4, flexShrink: 0, marginTop: 2 }}>
-        {issue.identifier}
+      <span style={{ fontFamily: 'monospace', fontSize: issue.id.startsWith('__new__') ? 8 : 10, background: '#f0efe9', color: issue.id.startsWith('__new__') ? '#e63946' : '#9a9a9e', padding: '2px 5px', borderRadius: 4, flexShrink: 0, marginTop: 2 }}>
+        {issue.id.startsWith('__new__') ? 'Not on Linear' : issue.identifier}
       </span>
 
+      {/* State */}
+      {issue.state?.name && (
+        <span style={{
+          fontFamily: 'monospace', fontSize: 8, padding: '2px 5px', borderRadius: 4, flexShrink: 0, marginTop: 2,
+          background: '#f0efe9', color: '#9a9a9e',
+        }}>
+          {issue.state.name}
+        </span>
+      )}
+
+      {/* Parent change indicator */}
+      {wasParent && <Was text={wasParent} />}
+
       {/* Title — click to edit */}
-      <div style={{ flexShrink: 0, width: 200, position: 'relative' }}
-        onMouseEnter={e => {
-          const el = e.currentTarget.querySelector('[data-title-text]')
-          if (el && el.scrollWidth > el.clientWidth) {
-            const tip = e.currentTarget.querySelector('[data-tooltip]')
-            if (tip) tip.style.display = 'block'
-          }
-        }}
-        onMouseLeave={e => {
-          const tip = e.currentTarget.querySelector('[data-tooltip]')
-          if (tip) tip.style.display = 'none'
-        }}
-      >
+      <div style={{ flex: 1, minWidth: 120 }}>
         {editingTitle ? (
           <input ref={titleInputRef} autoFocus value={titleVal}
             onChange={e => setTitleVal(e.target.value)}
@@ -153,14 +155,7 @@ function IssueRow({
         ) : (
           <>
             <div data-title-text onClick={startTitle}
-              style={{ ...ctrlStyle(true, false), fontSize: 11, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', cursor: 'text' }}>
-              {issue.title}
-            </div>
-            <div data-tooltip style={{
-              display: 'none', position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 100,
-              background: '#1a1a2e', color: 'white', fontSize: 11, padding: '6px 10px', borderRadius: 6,
-              whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: 350, boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-            }}>
+              style={{ ...ctrlStyle(true, false), fontSize: 11, whiteSpace: 'normal', wordBreak: 'break-word', cursor: 'text' }}>
               {issue.title}
             </div>
           </>
@@ -261,6 +256,20 @@ function IssueRow({
           return null
         })()}
       </div>
+
+      {/* Delete button for new (unsaved) issues */}
+      {issue.id.startsWith('__new__') && (
+        <span
+          onClick={e => { e.stopPropagation(); removeIssue(issue.id) }}
+          onMouseDown={e => e.stopPropagation()}
+          draggable={false}
+          style={{
+            flexShrink: 0, cursor: 'pointer', marginTop: 2, fontSize: 13, color: '#e63946',
+            fontWeight: 700, lineHeight: '20px', width: 20, textAlign: 'center',
+          }}
+          title="Delete new issue"
+        >&times;</span>
+      )}
     </div>
   )
 }
@@ -270,7 +279,7 @@ function ProjectBlock({
   proj, pi, initName, issues, excludedIssues, orderMap, initId, issueLabels, setIssueLabel,
   availableLabels, setEst, setTitle, members, getAssign, setAssign, cycles, setCycle,
   issueDeps, linearDepsSet, setIssueDepsFor, saveOrder, startIso, trackEdit, edits,
-  selected, toggleSelect, expandAll, isFirst,
+  selected, toggleSelect, expandAll, isFirst, addIssue, removeIssue, setParent,
 }) {
   const [collapsed, setCollapsed] = useState(!isFirst)
   useEffect(() => { if (expandAll !== null) setCollapsed(!expandAll) }, [expandAll])
@@ -279,16 +288,100 @@ function ProjectBlock({
   const dragFrom = useRef(null)
   const [dragOverIdx, setDragOverIdx] = useState(null)
   const [draggingIdx, setDraggingIdx] = useState(null)
+  const [nestMode, setNestMode] = useState(false) // 'nest', 'unnest', or false
+  const dragStartX = useRef(null)
   const [dropError, setDropError] = useState(null)
+  const [addingIssue, setAddingIssue] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const newTitleRef = useRef(null)
+  const reassignPrefixes = () => {
+    // Build parent→children grouping
+    const ordIds = new Set(ord.map(i => i.id))
+    const childrenOf = {}
+    const childIds = new Set()
+    ord.forEach(issue => {
+      if (issue.parent?.id && ordIds.has(issue.parent.id)) {
+        if (!childrenOf[issue.parent.id]) childrenOf[issue.parent.id] = []
+        childrenOf[issue.parent.id].push(issue)
+        childIds.add(issue.id)
+      }
+    })
+    // Assign [N] prefixes: top-level gets [1], [2], etc. Children get [1.1], [1.2], etc.
+    let topIdx = 0
+    ord.filter(i => !childIds.has(i.id)).forEach(issue => {
+      topIdx++
+      const applyPrefix = (iss, prefix) => {
+        const stripped = iss.title.replace(/^\[\d+(?:\.\d+)*\]\s*/, '')
+        const newTitle = `[${prefix}] ${stripped}`
+        if (newTitle !== iss.title) {
+          trackEdit(iss.id, 'title', edits[iss.id]?.title?.original ?? iss.title, newTitle)
+          setTitle(iss.id, newTitle)
+        }
+      }
+      applyPrefix(issue, String(topIdx))
+      const children = childrenOf[issue.id] || []
+      children.forEach((child, ci) => applyPrefix(child, `${topIdx}.${ci + 1}`))
+    })
+  }
+
+  // Check if [N] prefixes are out of sync with current order
+  const prefixesStale = (() => {
+    const ordIds = new Set(ord.map(i => i.id))
+    const childIds = new Set()
+    ord.forEach(issue => {
+      if (issue.parent?.id && ordIds.has(issue.parent.id)) childIds.add(issue.id)
+    })
+    const childrenOf = {}
+    ord.forEach(issue => {
+      if (issue.parent?.id && ordIds.has(issue.parent.id)) {
+        if (!childrenOf[issue.parent.id]) childrenOf[issue.parent.id] = []
+        childrenOf[issue.parent.id].push(issue)
+      }
+    })
+    let topIdx = 0
+    for (const issue of ord.filter(i => !childIds.has(i.id))) {
+      topIdx++
+      const stripped = issue.title.replace(/^\[\d+(?:\.\d+)*\]\s*/, '')
+      if (issue.title !== `[${topIdx}] ${stripped}`) return true
+      const children = childrenOf[issue.id] || []
+      for (let ci = 0; ci < children.length; ci++) {
+        const child = children[ci]
+        const cStripped = child.title.replace(/^\[\d+(?:\.\d+)*\]\s*/, '')
+        if (child.title !== `[${topIdx}.${ci + 1}] ${cStripped}`) return true
+      }
+    }
+    return false
+  })()
+
+  const handleAddIssue = () => {
+    const title = newTitle.trim()
+    if (title && addIssue) {
+      addIssue(proj.id, title)
+      setNewTitle('')
+      setAddingIssue(false)
+    }
+  }
 
   useEffect(() => setOrd(getOrdered(issues, proj.id, orderMap, initId)), [issues, orderMap])
 
   // ── Drag handlers ──
+  const NEST_THRESHOLD = 40
+
   const handleDragStart = (e, idx) => {
     dragFrom.current = idx
+    dragStartX.current = e.clientX
     setDraggingIdx(idx)
+    setNestMode(false)
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', idx.toString())
+  }
+
+  const detectNestMode = (clientX) => {
+    if (dragStartX.current === null) return
+    const dx = clientX - dragStartX.current
+    if (dx > NEST_THRESHOLD) setNestMode('nest')
+    else if (dx < -NEST_THRESHOLD) setNestMode('unnest')
+    else setNestMode(false)
   }
 
   const handleDragOver = (e, idx) => {
@@ -297,6 +390,7 @@ function ProjectBlock({
     const rect = e.currentTarget.getBoundingClientRect()
     const midY = rect.top + rect.height / 2
     setDragOverIdx(e.clientY < midY ? idx : idx + 1)
+    detectNestMode(e.clientX)
   }
 
   const handleContainerDragOver = (e) => {
@@ -308,15 +402,19 @@ function ProjectBlock({
     const lastRect = children[children.length - 1].getBoundingClientRect()
     if (e.clientY < firstRect.top + firstRect.height / 2) setDragOverIdx(0)
     else if (e.clientY > lastRect.top + lastRect.height / 2) setDragOverIdx(ord.length)
+    detectNestMode(e.clientX)
   }
 
   const handleDrop = (e) => {
     e.preventDefault()
     const fromIdx = dragFrom.current
     const toGap = dragOverIdx
+    const shouldNest = nestMode
     dragFrom.current = null
+    dragStartX.current = null
     setDraggingIdx(null)
     setDragOverIdx(null)
+    setNestMode(false)
 
     if (fromIdx === null || toGap === null) return
     if (toGap === fromIdx || toGap === fromIdx + 1) return
@@ -340,6 +438,23 @@ function ProjectBlock({
       }
     }
 
+    // Handle nesting / un-nesting
+    const movedIssue = next[insertAt]
+    if (shouldNest === 'nest' && insertAt > 0) {
+      const above = next[insertAt - 1]
+      if (above.parent?.id) {
+        // Above is a sub-issue → become a sibling (same parent)
+        setParent(movedIssue.id, above.parent.id)
+      } else {
+        // Above is top-level → nest under it
+        setParent(movedIssue.id, above.id)
+      }
+    } else if (shouldNest === 'unnest' && movedIssue.parent?.id) {
+      // Explicit drag left = un-nest
+      setParent(movedIssue.id, null)
+    }
+    // Normal drag (no horizontal shift) = keep existing parent as-is
+
     setDropError(null)
     setOrd(next)
     saveOrder(proj.id, next.map(i => i.id))
@@ -347,8 +462,10 @@ function ProjectBlock({
 
   const handleDragEnd = () => {
     dragFrom.current = null
+    dragStartX.current = null
     setDraggingIdx(null)
     setDragOverIdx(null)
+    setNestMode(false)
   }
 
   // ── Dependency helpers ──
@@ -392,8 +509,6 @@ function ProjectBlock({
     return true
   }
 
-  if (!ord.length) return null
-
   return (
     <div style={{ marginBottom: 6 }}>
       {/* Project header — clickable to collapse */}
@@ -422,6 +537,27 @@ function ProjectBlock({
         <span style={{ fontFamily: 'monospace', fontSize: 10, background: '#f0efe9', border: '1px solid #dddcd5', color: '#9a9a9e', padding: '2px 6px', borderRadius: 4 }}>
           {ord.length} issues
         </span>
+        <span
+          onClick={e => { e.stopPropagation(); reassignPrefixes() }}
+          style={{
+            fontFamily: 'monospace', fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer', flexShrink: 0,
+            background: prefixesStale ? '#fef3c7' : '#f0efe9',
+            border: `1px solid ${prefixesStale ? '#fde68a' : '#dddcd5'}`,
+            color: prefixesStale ? '#92400e' : '#9a9a9e',
+            fontWeight: prefixesStale ? 700 : 400,
+          }}
+          title="Update [N] prefixes in issue titles to match current order"
+        >Reassign [N]</span>
+        <span
+          onClick={e => { e.stopPropagation(); setAddingIssue(true); setCollapsed(false); setTimeout(() => newTitleRef.current?.focus(), 50) }}
+          style={{
+            width: 22, height: 22, borderRadius: 5, flexShrink: 0,
+            background: '#2d6a4f', color: 'white',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 14, fontWeight: 700, cursor: 'pointer',
+          }}
+          title="Add new issue"
+        >+</span>
       </div>
 
       {/* Issues list */}
@@ -448,7 +584,7 @@ function ProjectBlock({
                 const isExcluded = excludedIssues.has(issue.id)
                 return (
                   <div key={issue.id}>
-                    {showLine(ordIdx) && <div style={{ height: 3, background: '#e63946', borderRadius: 2, margin: '2px 0', marginLeft: indent }} />}
+                    {showLine(ordIdx) && <div style={{ height: 3, background: nestMode === 'nest' ? '#2d6a4f' : nestMode === 'unnest' ? '#e67e22' : '#e63946', borderRadius: 2, margin: '2px 0', marginLeft: nestMode === 'nest' ? 30 : 0 }} />}
                     <div style={{ display: 'flex', alignItems: 'stretch' }}>
                       {/* Connecting line for sub-issues */}
                       {isChild && (
@@ -478,6 +614,7 @@ function ProjectBlock({
                           trackEdit={trackEdit} issueEdits={edits[issue.id]}
                           isSelected={selected.has(issue.id)}
                           onToggleSelect={() => toggleSelect(issue.id)}
+                          removeIssue={removeIssue}
                         />
                       </div>
                     </div>
@@ -495,8 +632,25 @@ function ProjectBlock({
                 return renderIssue(issue, ordIdx, 0, String(topIdx))
               })
             })()}
-            {showLine(ord.length) && <div style={{ height: 3, background: '#e63946', borderRadius: 2, margin: '2px 0' }} />}
+            {showLine(ord.length) && <div style={{ height: 3, background: nestMode === 'nest' ? '#2d6a4f' : nestMode === 'unnest' ? '#e67e22' : '#e63946', borderRadius: 2, margin: '2px 0', marginLeft: nestMode === 'nest' ? 30 : 0 }} />}
           </div>
+
+          {/* Add issue inline */}
+          {addingIssue && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', marginTop: 4 }}>
+              <input
+                ref={newTitleRef}
+                autoFocus
+                placeholder="New issue title..."
+                value={newTitle}
+                onChange={e => setNewTitle(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleAddIssue(); if (e.key === 'Escape') { setAddingIssue(false); setNewTitle('') } }}
+                style={{ ...inpS, flex: 1, fontSize: 12 }}
+              />
+              <GBtn sm onClick={handleAddIssue} disabled={!newTitle.trim()}>Add</GBtn>
+              <GBtn sm onClick={() => { setAddingIssue(false); setNewTitle('') }}>Cancel</GBtn>
+            </div>
+          )}
 
           {/* Drop error */}
           {dropError && (
@@ -571,7 +725,7 @@ function InitiativeSection({
   issueLabels, setIssueLabel, availableLabels,
   setEst, setTitle, members, getAssign, setAssign, cycles, setCycle,
   issueDeps, linearDepsSet, setIssueDepsFor, saveOrder, startIso, trackEdit, edits,
-  selected, toggleSelect, expandAll, isFirst,
+  selected, toggleSelect, expandAll, isFirst, addIssue, removeIssue, setParent,
 }) {
   const [collapsed, setCollapsed] = useState(!isFirst)
   useEffect(() => { if (expandAll !== null) setCollapsed(!expandAll) }, [expandAll])
@@ -625,7 +779,7 @@ function InitiativeSection({
               saveOrder={saveOrder} startIso={startIso}
               trackEdit={trackEdit} edits={edits}
               selected={selected} toggleSelect={toggleSelect}
-              expandAll={expandAll}
+              expandAll={expandAll} addIssue={addIssue} removeIssue={removeIssue} setParent={setParent}
             />
           ))}
         </div>
@@ -640,14 +794,17 @@ export default function StepConfigureIssues({
   orderMap, initId, issueLabels, setIssueLabel, availableLabels,
   setEst, setTitle, members, getAssign, setAssign, cycles, setCycle,
   issueDeps, linearDepsSet, crossProjectDeps, setIssueDepsFor,
+  addIssue, removeIssue, setParent, teamId, onReplaceNewIssues,
   saveOrder, startIso, trackEdit,
   edits, setEdits, apiKey, onSaveComplete,
   linearRelationIds, baselineDeps,
   excludedIssues, setExcludedIssues,
+  refreshFromLinear,
   err, onNext, onBack,
 }) {
   const [selected, setSelected] = useState(new Set())
   const [showExcluded, setShowExcluded] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [showCrossProjectDeps, setShowCrossProjectDeps] = useState(false)
   const [userChangedDeps, setUserChangedDeps] = useState(false)
   const wrappedSetIssueDepsFor = (issueId, depIds) => {
@@ -731,9 +888,10 @@ export default function StepConfigureIssues({
   const depChangeCount = depAdded.length + depRemoved.length
 
   // ── Save to Linear ──
+  const newIssueCount = issues.filter(i => i.id.startsWith('__new__')).length
   const editCount = Object.keys(edits).length ? Object.values(edits).reduce((sum, e) => sum + Object.keys(e).length, 0) : 0
-  const totalChangeCount = editCount + depChangeCount
-  const hasChanges = editCount > 0 || userChangedDeps
+  const totalChangeCount = editCount + depChangeCount + newIssueCount
+  const hasChanges = editCount > 0 || userChangedDeps || newIssueCount > 0
   const [saving, setSaving] = useState(false)
   const [saveResult, setSaveResult] = useState(null)
 
@@ -743,8 +901,39 @@ export default function StepConfigureIssues({
     let ok = 0, failed = 0
     const errors = []
 
-    // Save field edits
+    // Create new issues in Linear
+    const newIssues = issues.filter(i => i.id.startsWith('__new__'))
+    const backlogStateId = issues.find(i => i.state?.type === 'backlog')?.state?.id || null
+    const idMap = {} // tempId → realId
+    for (const issue of newIssues) {
+      try {
+        const input = { title: issue.title, teamId, projectId: issue.project?.id }
+        if (backlogStateId) input.stateId = backlogStateId
+        if (issue.estimate) input.estimate = issue.estimate
+        if (issue.parent?.id && !issue.parent.id.startsWith('__new__')) input.parentId = issue.parent.id
+        const assignVal = getAssign(issue.id)
+        if (assignVal && assignVal !== '__auto__') input.assigneeId = assignVal
+        const result = await linearQuery(apiKey, buildIssueCreateMutation(), { input })
+        const created = result.issueCreate.issue
+        // Clear any auto-assigned assignee if user didn't explicitly set one
+        if (!assignVal || assignVal === '__auto__') {
+          await linearQuery(apiKey, buildIssueUpdateMutation(), { id: created.id, input: { assigneeId: null } }).catch(() => {})
+        }
+        idMap[issue.id] = created
+        ok++
+      } catch (e) {
+        errors.push(`New "${issue.title}": ${e.message}`)
+        failed++
+      }
+    }
+    // Replace temp IDs in local state with real Linear IDs
+    if (Object.keys(idMap).length) {
+      onReplaceNewIssues(idMap)
+    }
+
+    // Save field edits (skip new issues — they were just created)
     for (const [issueId, fields] of Object.entries(edits)) {
+      if (issueId.startsWith('__new__')) continue
       const issue = issues.find(i => i.id === issueId)
       const label = issue?.identifier || issueId
       try {
@@ -753,6 +942,7 @@ export default function StepConfigureIssues({
         if (fields.estimate) input.estimate = fields.estimate.edited
         if (fields.cycle) input.cycleId = fields.cycle.edited || null
         if (fields.assignee) input.assigneeId = fields.assignee.edited || null
+        if (fields.parent !== undefined) input.parentId = fields.parent.edited || null
         if (Object.keys(input).length) {
           await linearQuery(apiKey, buildIssueUpdateMutation(), { id: issueId, input })
         }
@@ -919,6 +1109,20 @@ export default function StepConfigureIssues({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 20 }}>
         <GBtn onClick={onBack}>&#8592; Back</GBtn>
         <div style={{ display: 'flex', gap: 8 }}>
+          <GBtn sm disabled={refreshing} onClick={() => {
+            const warnings = []
+            if (newIssueCount > 0) warnings.push(`${newIssueCount} new issue${newIssueCount !== 1 ? 's' : ''} not yet saved to Linear`)
+            if (editCount > 0) warnings.push(`${editCount} unsaved edit${editCount !== 1 ? 's' : ''}`)
+            if (userChangedDeps) warnings.push('unsaved dependency changes')
+            if (warnings.length > 0) {
+              const msg = `You have:\n- ${warnings.join('\n- ')}\n\nRefreshing will discard these changes. Continue?`
+              if (!window.confirm(msg)) return
+            }
+            setRefreshing(true)
+            setSaveResult(null)
+            setUserChangedDeps(false)
+            refreshFromLinear().then(() => setRefreshing(false)).catch(() => setRefreshing(false))
+          }}>{refreshing ? 'Refreshing...' : 'Refresh from Linear'}</GBtn>
           <GBtn sm onClick={() => setExpandSignal(p => Math.abs(p) + 1)}>Expand all</GBtn>
           <GBtn sm onClick={() => setExpandSignal(p => -(Math.abs(p) + 1))}>Collapse all</GBtn>
           <Btn onClick={onNext}>Next &#8594;</Btn>
@@ -944,7 +1148,7 @@ export default function StepConfigureIssues({
           saveOrder={saveOrder} startIso={startIso}
           trackEdit={trackEdit} edits={edits}
           selected={selected} toggleSelect={toggleSelect}
-          expandAll={expandAll}
+          expandAll={expandAll} addIssue={addIssue} removeIssue={removeIssue} setParent={setParent}
         />
       ))}
 

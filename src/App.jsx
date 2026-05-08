@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { loadStorage, saveStorage } from './utils/storage.js'
+import { linearQuery, GQL_INITIATIVES, buildIssueQuery, STATE_TYPES } from './utils/linear.js'
 import { computePlan, getEligible, getOrdered } from './utils/plan.js'
 import StepConnect from './components/StepConnect.jsx'
 import { StepTeam, StepCycle, StepInitiatives, StepProjects, StepProjOrder, StepStates, StepLabelMap } from './components/StepSetup.jsx'
@@ -210,6 +211,143 @@ export default function App() {
         setOrderMap(om)
       }
     }
+  }
+
+  const addIssue = (projectId, title) => {
+    const proj = projects.find(p => p.id === projectId)
+    const tempId = `__new__${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const newIssue = {
+      id: tempId,
+      identifier: 'NEW',
+      title,
+      estimate: null,
+      assignee: null,
+      project: proj ? { id: proj.id, name: proj.name } : null,
+      state: { name: 'Backlog', type: 'backlog' },
+      labels: { nodes: [] },
+      cycle: null,
+      relations: { nodes: [] },
+      parent: null,
+      children: { nodes: [] },
+    }
+    setAllIssues(prev => [...prev, newIssue])
+    setIssues(prev => [...prev, newIssue])
+    return tempId
+  }
+
+  // Replace temp new issues with real Linear data after save
+  const replaceNewIssues = (idMap) => {
+    // idMap: { tempId → { id, identifier, title, estimate } }
+    const replacer = issue => {
+      const real = idMap[issue.id]
+      if (!real) return issue
+      return { ...issue, id: real.id, identifier: real.identifier }
+    }
+    setAllIssues(prev => prev.map(replacer))
+    setIssues(prev => prev.map(replacer))
+  }
+
+  const setParent = (issueId, parentId) => {
+    const issue = issues.find(i => i.id === issueId)
+    const parentIssue = parentId ? issues.find(i => i.id === parentId) : null
+    const parentRef = parentIssue ? { id: parentIssue.id, identifier: parentIssue.identifier } : null
+    const updater = prev => prev.map(i => i.id === issueId ? { ...i, parent: parentRef } : i)
+    setAllIssues(updater)
+    setIssues(updater)
+    // Track edit for existing Linear issues
+    if (issue && !issueId.startsWith('__new__')) {
+      const origParentId = edits[issueId]?.parent?.original ?? issue.parent?.id ?? null
+      trackEdit(issueId, 'parent', origParentId, parentId || null)
+    }
+  }
+
+  const removeIssue = (id) => {
+    if (!id.startsWith('__new__')) return
+    setAllIssues(prev => prev.filter(i => i.id !== id))
+    setIssues(prev => prev.filter(i => i.id !== id))
+  }
+
+  const refreshFromLinear = async () => {
+    // Re-fetch initiatives + issues from Linear, rebuild state
+    const dInits = await linearQuery(apiKey, GQL_INITIATIVES)
+    const allIssueNodes = []
+    for (const st of STATE_TYPES) {
+      const d2 = await linearQuery(apiKey, buildIssueQuery(st))
+      if (d2.issues?.nodes?.length) allIssueNodes.push(...d2.issues.nodes)
+    }
+    // Attach issues to projects
+    const byProj = {}
+    allIssueNodes.forEach(i => {
+      if (i.project?.id) {
+        if (!byProj[i.project.id]) byProj[i.project.id] = []
+        byProj[i.project.id].push(i)
+      }
+    })
+    const enrichedInits = dInits.initiatives.nodes.map(it => ({
+      ...it,
+      projects: { nodes: (it.projects?.nodes || []).map(p => ({ ...p, _issues: byProj[p.id] || [] })) },
+    }))
+    setAllInits(enrichedInits)
+
+    // Rebuild issues for selected projects
+    const projMap = {}
+    enrichedInits.forEach(it => (it.projects?.nodes || []).forEach(p => {
+      if (selProjects.has(p.id)) projMap[p.id] = p
+    }))
+    const projs = Object.values(projMap)
+    let allIss = []
+    projs.forEach(p => (p._issues || []).forEach(i => { allIss.push({ ...i, project: { id: p.id, name: p.name } }) }))
+    setProjects(projs)
+    setAllIssues(allIss)
+
+    // Re-extract Linear deps
+    const allIssueIds = new Set(allIss.map(i => i.id))
+    const issueProj = {}
+    allIss.forEach(i => { if (i.project?.id) issueProj[i.id] = i.project.id })
+    const linearDeps = {}
+    const newRelIds = {}
+    const xDeps = []
+    allIssueNodes.forEach(issue => {
+      (issue.relations?.nodes || []).forEach(rel => {
+        const rid = rel.relatedIssue?.id
+        if (!rid || !allIssueIds.has(rid)) return
+        let fromId, toId
+        if (rel.type === 'blocks') { fromId = issue.id; toId = rid }
+        else if (rel.type === 'is blocked by') { fromId = rid; toId = issue.id }
+        else return
+        newRelIds[`${toId}::${fromId}`] = rel.id
+        if (issueProj[fromId] && issueProj[toId] && issueProj[fromId] !== issueProj[toId]) {
+          const fromIssue = allIss.find(i => i.id === fromId)
+          const toIssue = allIss.find(i => i.id === toId)
+          if (fromIssue && toIssue) xDeps.push({ blocker: fromIssue, blocked: toIssue })
+          return
+        }
+        if (!linearDeps[toId]) linearDeps[toId] = []
+        if (!linearDeps[toId].includes(fromId)) linearDeps[toId].push(fromId)
+      })
+    })
+
+    // Merge Linear deps with persisted user deps
+    const merged = { ...issueDeps }
+    Object.entries(linearDeps).forEach(([id, deps]) => {
+      const existing = new Set(merged[id] || [])
+      deps.forEach(d => existing.add(d))
+      merged[id] = [...existing]
+    })
+    const ldSet = {}
+    Object.entries(linearDeps).forEach(([id, deps]) => { ldSet[id] = new Set(deps) })
+    setIssueDeps(merged)
+    setLinearDepsSet(ldSet)
+    setBaselineDeps(merged)
+    setLinearRelationIds(newRelIds)
+    setCrossProjectDeps(xDeps)
+
+    // Apply state filter
+    const filtered = selStates.size ? allIss.filter(i => selStates.has(i.state?.type)) : allIss
+    setIssues(filtered)
+
+    // Reset session edits
+    setEdits({})
   }
 
   const setCycle = (id, cycleId) => {
@@ -595,8 +733,6 @@ export default function App() {
       <nav style={{ width: 200, flexShrink: 0, background: '#1a1a2e', display: 'flex', flexDirection: 'column', padding: '24px 0', position: 'sticky', top: 0, height: '100vh', overflowY: 'auto' }}>
         <div style={{ padding: '0 20px 20px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ width: 32, height: 32, background: '#e63946', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14, color: 'white', marginBottom: 10 }}>LP</div>
-          <div style={{ fontWeight: 700, fontSize: 13, color: 'white' }}>Initiative Planner</div>
-          {init && <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginTop: 3, fontFamily: 'monospace', wordBreak: 'break-word' }}>{init.name}</div>}
         </div>
         <div style={{ padding: '12px 0', flex: 1 }}>
           {STEPS.map((label, i) => (
@@ -624,7 +760,7 @@ export default function App() {
 
       {/* Main */}
       <main ref={mainRef} style={{ flex: 1, overflowY: 'auto', padding: '40px 32px' }}>
-        <div style={{ maxWidth: step === 10 ? 'none' : 860, margin: '0 auto' }}>
+        <div style={{ maxWidth: (step === 7 || step === 10) ? 'none' : 860, margin: '0 auto' }}>
 
 
           {step === 0  && <StepConnect onConnected={onConnected} autoConnect={!!(loadStorage().step && localStorage.getItem('lp-apikey'))} />}
@@ -658,6 +794,8 @@ export default function App() {
             issueDeps={issueDeps} linearDepsSet={linearDepsSet} crossProjectDeps={crossProjectDeps}
             setIssueDepsFor={setIssueDepsFor}
             setTitle={setTitle}
+            addIssue={addIssue} removeIssue={removeIssue} setParent={setParent} teamId={selTeamId} onReplaceNewIssues={replaceNewIssues}
+            refreshFromLinear={refreshFromLinear}
             saveOrder={saveOrder} startIso={startIso} trackEdit={trackEdit}
             edits={edits} setEdits={setEdits} apiKey={apiKey}
             onSaveComplete={() => {

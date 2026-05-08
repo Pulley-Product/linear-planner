@@ -615,7 +615,7 @@ export function StepProjOrder({ projects, issues, chosenInits, projOrder, setPro
   return (
     <div>
       <H1>Determine <R>Project Priority</R></H1>
-      <Sub>Drag projects into priority order. #1 gets first pick of capacity. Click "depends on completion of" to set hard dependencies.</Sub>
+      <Sub>Drag projects into priority order. #1 gets first pick of capacity. Click "depends on completion of" to set hard dependencies (if projectB depends on projectA, projectB will not start until all issues in projectA are completed).</Sub>
       <Row><GBtn onClick={onBack}>← Back</GBtn><Btn onClick={() => {
         const err = validateOrder(projOrder)
         if (err) setDropError(err)
