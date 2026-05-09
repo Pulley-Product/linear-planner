@@ -122,7 +122,7 @@ export function StepCycle({ cycles, selCycleId, setSelCycleId, err, onNext, onBa
             <Radio checked={selCycleId === c.id} />
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 600, fontSize: 13 }}>
-                Cycle {c.number}{c.name ? ` — ${c.name}` : ''}
+                Cycle {c.number}{c.name && c.name !== `Cycle ${c.number}` ? ` — ${c.name}` : ''}
               </div>
               <div style={{ fontSize: 11, color: '#9a9a9e', fontFamily: 'monospace', marginTop: 2 }}>
                 {fmt(c.startsAt)} → {fmt(c.endsAt)}

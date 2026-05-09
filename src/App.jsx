@@ -241,10 +241,31 @@ export default function App() {
     const replacer = issue => {
       const real = idMap[issue.id]
       if (!real) return issue
-      return { ...issue, id: real.id, identifier: real.identifier }
+      const next = { ...issue, id: real.id, identifier: real.identifier }
+      if (next.parent?.id && idMap[next.parent.id]) {
+        next.parent = { id: idMap[next.parent.id].id, identifier: idMap[next.parent.id].identifier }
+      }
+      return next
     }
     setAllIssues(prev => prev.map(replacer))
     setIssues(prev => prev.map(replacer))
+
+    // Rewrite any temp IDs referenced inside dep tracking to their real IDs
+    const remap = id => idMap[id]?.id || id
+    const remapMap = m => {
+      const next = {}
+      for (const [k, vs] of Object.entries(m)) next[remap(k)] = vs.map(remap)
+      return next
+    }
+    const newDeps = remapMap(issueDeps)
+    setIssueDeps(newDeps)
+    setBaselineDeps(remapMap(baselineDeps))
+    const newLD = {}
+    for (const [k, set] of Object.entries(linearDepsSet)) {
+      newLD[remap(k)] = new Set([...set].map(remap))
+    }
+    setLinearDepsSet(newLD)
+    persist({ issueDeps: newDeps })
   }
 
   const setParent = (issueId, parentId) => {
@@ -615,6 +636,8 @@ export default function App() {
       }
     })
     setIssueDeps(cleanedIssueDeps)
+    // Re-baseline so the dep diff in step 7 doesn't report out-of-scope deps as phantom removals.
+    setBaselineDeps(cleanedIssueDeps)
     persist(snap({ projOrder: order, projDeps: cleanedDeps, issueDeps: cleanedIssueDeps }))
     // Derive available states from Linear data
     const availableTypes = new Set(allIss.map(i => i.state?.type).filter(Boolean))
@@ -684,7 +707,9 @@ export default function App() {
   }
 
   const confirmConfigureIssues = () => {
-    const activeIssues = issues.filter(i => !excludedIssues.has(i.id))
+    const issueIdSet = new Set(issues.map(i => i.id))
+    const parentIdSet = new Set(issues.filter(i => i.parent?.id && issueIdSet.has(i.parent.id)).map(i => i.parent.id))
+    const activeIssues = issues.filter(i => !excludedIssues.has(i.id) && !parentIdSet.has(i.id))
     // Check all active issues have labels or member assignment
     const unlabelled = activeIssues.filter(i => {
       const hasLabel = (i.labels?.nodes || []).length > 0 || !!issueLabels[i.id]
@@ -716,11 +741,24 @@ export default function App() {
   const team = allTeams.find(t => t.id === selTeamId)
   const cycles = (team?.cycles?.nodes || []).slice().sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt))
 
-  const planIssues = excludedIssues.size ? issues.filter(i => !excludedIssues.has(i.id)) : issues
+  const issueIdSet = new Set(issues.map(i => i.id))
+  const parentIdSet = new Set(issues.filter(i => i.parent?.id && issueIdSet.has(i.parent.id)).map(i => i.parent.id))
+  const planIssues = issues.filter(i => !excludedIssues.has(i.id) && !parentIdSet.has(i.id))
+  // Parent → direct children, derived from the full state-filtered issues list
+  // (built before parent filtering so the hierarchy is preserved). Used by the
+  // planner to expand a dep on a parent issue into deps on its leaf descendants.
+  const childrenByParent = {}
+  issues.forEach(i => {
+    if (i.parent?.id) {
+      if (!childrenByParent[i.parent.id]) childrenByParent[i.parent.id] = []
+      childrenByParent[i.parent.id].push(i.id)
+    }
+  })
   const plan = step === 10 && init ? computePlan({
     issues: planIssues, projects, members, cycles, startIso,
     orderMap, initId: init.id, assignMap, caps,
     labelMap, issueLabels, projOrder, projDeps, issueDeps,
+    childrenByParent,
   }) : null
 
   // ── Layout ──────────────────────────────────────────────────────────────────

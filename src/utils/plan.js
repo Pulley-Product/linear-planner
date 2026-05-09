@@ -44,6 +44,7 @@ export function computePlan({
   projOrder,
   projDeps,
   issueDeps,
+  childrenByParent = {},
 }) {
   const getCap = mid => caps[initId]?.[mid] ?? 10
   const getAssign = id => assignMap[initId]?.[id] ?? null
@@ -57,8 +58,10 @@ export function computePlan({
   const dateToCI = isoDate => {
     if (!isoDate || !sortedCycles.length) return 0
     const d = new Date(isoDate)
+    // Half-open interval [startsAt, endsAt) — boundary dates belong to the next cycle,
+    // since Linear sets cycle N's endsAt equal to cycle N+1's startsAt.
     for (let ci = 0; ci < sortedCycles.length; ci++) {
-      if (d >= new Date(sortedCycles[ci].startsAt) && d <= new Date(sortedCycles[ci].endsAt)) return ci
+      if (d >= new Date(sortedCycles[ci].startsAt) && d < new Date(sortedCycles[ci].endsAt)) return ci
     }
     if (d < new Date(sortedCycles[0].startsAt)) return 0
     return sortedCycles.length - 1
@@ -76,6 +79,17 @@ export function computePlan({
   issues.forEach(i => {
     if (i.cycle?.startsAt) committedCI[i.id] = dateToCI(i.cycle.startsAt)
   })
+
+  // Recursively expand a dep ID to its leaf descendants. Parents aren't in the
+  // planning set, so a dep on a parent must be translated to deps on the
+  // sub-issues that actually get scheduled.
+  const expandDep = (depId, seen = new Set()) => {
+    if (seen.has(depId)) return [] // cycle protection
+    seen.add(depId)
+    const kids = childrenByParent[depId]
+    if (!kids?.length) return [depId]
+    return kids.flatMap(c => expandDep(c, seen))
+  }
 
   // Helper: find the member for an issue (user-assigned or auto-pick by label)
   const eligible = (issue) => getEligible(issue, members, labelMap, issueLabels).map(m => byMid[m.id]).filter(Boolean)
@@ -210,12 +224,21 @@ export function computePlan({
 
       const totalPts = issue.estimate || 1
 
-      // Calculate earliest start: project deps + issue deps, never before startCI
+      // Calculate earliest start: project deps + issue deps, never before startCI.
+      // Issue deps use ">=" semantics (same cycle as blocker's last cycle is OK)
+      // — cycles are 2-week buckets and capacity, not cycle boundaries, is the
+      // real constraint. placeIssue spills to the next cycle automatically when
+      // the eligible member has no room left.
       let minCI = Math.max(projMinCI, startCI)
       ;(issueDeps[issue.id] || []).forEach(depId => {
-        if (issueLastCI[depId] !== undefined) {
-          minCI = Math.max(minCI, issueLastCI[depId] + 1)
-        }
+        // If depId is a parent issue, expand to its leaf descendants — the
+        // parent itself isn't scheduled, but waiting on it means waiting on
+        // all its sub-issues to finish.
+        expandDep(depId).forEach(leafId => {
+          if (issueLastCI[leafId] !== undefined) {
+            minCI = Math.max(minCI, issueLastCI[leafId])
+          }
+        })
       })
 
       // Pick member

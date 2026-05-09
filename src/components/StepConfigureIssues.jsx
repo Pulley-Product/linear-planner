@@ -11,7 +11,7 @@ function Was({ text }) {
 
 // ── Issue Row (combined: drag, estimate, label, assignment, deps) ────────────
 function IssueRow({
-  issue, idx, displayLabel, isDragging, isExcluded, issueLabels, setIssueLabel, availableLabels,
+  issue, idx, displayLabel, isDragging, isExcluded, isParent, issueLabels, setIssueLabel, availableLabels,
   setEst, setTitle, members, getAssign, setAssign, cycles, setCycle,
   deps, linearDepsSet, onOpenDepModal, trackEdit, issueEdits,
   isSelected, onToggleSelect, removeIssue,
@@ -163,62 +163,67 @@ function IssueRow({
         {wasTitle && <Was text={wasTitle} />}
       </div>
 
-      {/* Cycle */}
-      <div style={{ flexShrink: 0 }}>
-        <select value={issue.cycle?.id || ''} onChange={handleCycleChange}
-          onMouseDown={e => e.stopPropagation()} draggable={false}
-          style={{ ...ctrlStyle(hasCycle, false), width: 60 }}>
-          <option value=''>auto</option>
-          {(() => {
-            const seen = new Set()
-            const opts = []
-            // Add issue's current cycle first if not in future cycles
-            if (issue.cycle?.id) {
-              if (!cycles.some(c => c.id === issue.cycle.id)) {
+      {/* Locked-control style for parent issues — read-only display */}
+      {(() => {
+        const lockedStyle = (w) => ({ ...ctrlStyle(false, false), width: w, opacity: 0.45, color: '#9a9a9e', display: 'inline-block', textAlign: 'center', cursor: 'not-allowed' })
+
+        // Cycle
+        const cycleEl = isParent ? (
+          <span style={lockedStyle(60)}>{issue.cycle?.number ? `C${issue.cycle.number}` : 'auto'}</span>
+        ) : (
+          <select value={issue.cycle?.id || ''} onChange={handleCycleChange}
+            onMouseDown={e => e.stopPropagation()} draggable={false}
+            style={{ ...ctrlStyle(hasCycle, false), width: 60 }}>
+            <option value=''>auto</option>
+            {(() => {
+              const seen = new Set()
+              const opts = []
+              if (issue.cycle?.id && !cycles.some(c => c.id === issue.cycle.id)) {
                 opts.push({ id: issue.cycle.id, number: issue.cycle.number })
                 seen.add(issue.cycle.id)
               }
+              cycles.forEach(c => { if (!seen.has(c.id)) { seen.add(c.id); opts.push(c) } })
+              return opts.map(c => <option key={c.id} value={c.id}>C{c.number}</option>)
+            })()}
+          </select>
+        )
+
+        // Label
+        const labelEl = isParent ? (
+          <span style={lockedStyle(90)}>{effectiveLabel || 'no label'}</span>
+        ) : (
+          <select value={issueLabels[issue.id] || ''} onChange={handleLabelChange}
+            onMouseDown={e => e.stopPropagation()} draggable={false}
+            style={{ ...ctrlStyle(hasLabel, !hasLabelOrAssignment), width: 90 }}>
+            {linearLabel && !issueLabels[issue.id]
+              ? <option value=''>{linearLabel}</option>
+              : <option value=''>{linearLabel || 'no label'}</option>
             }
-            cycles.forEach(c => {
-              if (!seen.has(c.id)) { seen.add(c.id); opts.push(c) }
-            })
-            return opts.map(c => <option key={c.id} value={c.id}>C{c.number}</option>)
-          })()}
-        </select>
-        {wasCycle && <Was text={wasCycle} />}
-      </div>
+            {availableLabels.filter(l => l !== linearLabel).map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+        )
 
-      {/* Label */}
-      <div style={{ flexShrink: 0 }}>
-        <select value={issueLabels[issue.id] || ''} onChange={handleLabelChange}
-          onMouseDown={e => e.stopPropagation()} draggable={false}
-          style={{ ...ctrlStyle(hasLabel, !hasLabelOrAssignment), width: 90 }}>
-          {linearLabel && !issueLabels[issue.id]
-            ? <option value=''>{linearLabel}</option>
-            : <option value=''>{linearLabel || 'no label'}</option>
-          }
-          {availableLabels.filter(l => l !== linearLabel).map(l => <option key={l} value={l}>{l}</option>)}
-        </select>
-        {wasLabel && <Was text={wasLabel} />}
-      </div>
+        // Member
+        const assignedId = getAssign(issue.id) || issue.assignee?.id
+        const assignedName = assignedId ? (members.find(m => m.id === assignedId)?.name || issue.assignee?.name || '—') : 'auto'
+        const memberEl = isParent ? (
+          <span style={lockedStyle(90)}>{assignedName}</span>
+        ) : (
+          <select value={getAssign(issue.id) || issue.assignee?.id || '__auto__'} onChange={handleAssignChange}
+            onMouseDown={e => e.stopPropagation()} draggable={false}
+            style={{ ...ctrlStyle(hasAssignment && !assigneeNotOnTeam, !hasLabelOrAssignment || assigneeNotOnTeam), width: 90 }}>
+            <option value='__auto__'>auto</option>
+            {issue.assignee?.id && !members.some(m => m.id === issue.assignee.id) && (
+              <option value={issue.assignee.id}>{issue.assignee.name}</option>
+            )}
+            {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        )
 
-      {/* Member */}
-      <div style={{ flexShrink: 0 }}>
-        <select value={getAssign(issue.id) || issue.assignee?.id || '__auto__'} onChange={handleAssignChange}
-          onMouseDown={e => e.stopPropagation()} draggable={false}
-          style={{ ...ctrlStyle(hasAssignment && !assigneeNotOnTeam, !hasLabelOrAssignment || assigneeNotOnTeam), width: 90 }}>
-          <option value='__auto__'>auto</option>
-          {issue.assignee?.id && !members.some(m => m.id === issue.assignee.id) && (
-            <option value={issue.assignee.id}>{issue.assignee.name}</option>
-          )}
-          {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
-        {wasAssignee && <Was text={wasAssignee} />}
-      </div>
-
-      {/* Estimate */}
-      <div style={{ flexShrink: 0 }}>
-        {editingEst ? (
+        // Estimate
+        const estEl = isParent ? (
+          <span style={lockedStyle(45)}>{hasEst ? `${issue.estimate}pt` : '—'}</span>
+        ) : editingEst ? (
           <input autoFocus type='number' min={1} max={200} value={estVal}
             onChange={e => setEstVal(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') commitEst(); if (e.key === 'Escape') setEditingEst(false) }}
@@ -230,32 +235,55 @@ function IssueRow({
             style={{ ...ctrlStyle(hasEst, !hasEst), width: 45, textAlign: 'center', cursor: 'pointer', display: 'inline-block' }}>
             {hasEst ? `${issue.estimate}pt` : '? pt'}
           </span>
-        )}
-        {wasEst && <Was text={wasEst} />}
-      </div>
+        )
 
-      {/* Dependencies */}
-      <div style={{ flexShrink: 0, marginTop: 1 }}>
-        <button
-          type="button"
-          onMouseDown={e => e.stopPropagation()}
-          onDragStart={e => { e.preventDefault(); e.stopPropagation() }}
-          draggable={false}
-          onClick={e => { e.stopPropagation(); e.preventDefault(); onOpenDepModal(issue.id) }}
-          style={{ ...ctrlStyle(deps.length > 0, false), width: 55, textAlign: 'center', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-          {deps.length
-            ? `${deps.length} dep${deps.length > 1 ? 's' : ''}`
-            : 'no deps'}
-        </button>
-        {(() => {
+        // Dependencies
+        const depsEl = isParent ? (
+          <span style={lockedStyle(55)}>{deps.length ? `${deps.length} dep${deps.length > 1 ? 's' : ''}` : 'no deps'}</span>
+        ) : (
+          <button
+            type="button"
+            onMouseDown={e => e.stopPropagation()}
+            onDragStart={e => { e.preventDefault(); e.stopPropagation() }}
+            draggable={false}
+            onClick={e => { e.stopPropagation(); e.preventDefault(); onOpenDepModal(issue.id) }}
+            style={{ ...ctrlStyle(deps.length > 0, false), width: 55, textAlign: 'center', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            {deps.length ? `${deps.length} dep${deps.length > 1 ? 's' : ''}` : 'no deps'}
+          </button>
+        )
+
+        const depsChangeIndicator = (() => {
+          if (isParent) return null
           const origSet = linearDepsSet[issue.id]
           const origCount = origSet?.size || 0
           const currentSet = new Set(deps)
           const sameDeps = origCount === currentSet.size && (origCount === 0 || [...origSet].every(d => currentSet.has(d)))
-          if (!sameDeps) return <Was text="changed" />
-          return null
-        })()}
-      </div>
+          return sameDeps ? null : <Was text="changed" />
+        })()
+
+        return <>
+          <div style={{ flexShrink: 0 }}>
+            {cycleEl}
+            {!isParent && wasCycle && <Was text={wasCycle} />}
+          </div>
+          <div style={{ flexShrink: 0 }}>
+            {labelEl}
+            {!isParent && wasLabel && <Was text={wasLabel} />}
+          </div>
+          <div style={{ flexShrink: 0 }}>
+            {memberEl}
+            {!isParent && wasAssignee && <Was text={wasAssignee} />}
+          </div>
+          <div style={{ flexShrink: 0 }}>
+            {estEl}
+            {!isParent && wasEst && <Was text={wasEst} />}
+          </div>
+          <div style={{ flexShrink: 0, marginTop: 1 }}>
+            {depsEl}
+            {depsChangeIndicator}
+          </div>
+        </>
+      })()}
 
       {/* Delete button for new (unsaved) issues */}
       {issue.id.startsWith('__new__') && (
@@ -582,6 +610,7 @@ function ProjectBlock({
                 const isChild = indent > 0
                 const children = childrenOf[issue.id] || []
                 const isExcluded = excludedIssues.has(issue.id)
+                const isParent = children.length > 0
                 return (
                   <div key={issue.id}>
                     {showLine(ordIdx) && <div style={{ height: 3, background: nestMode === 'nest' ? '#2d6a4f' : nestMode === 'unnest' ? '#e67e22' : '#e63946', borderRadius: 2, margin: '2px 0', marginLeft: nestMode === 'nest' ? 30 : 0 }} />}
@@ -603,7 +632,7 @@ function ProjectBlock({
                       >
                         <IssueRow
                           issue={issue} idx={ordIdx} displayLabel={displayLabel}
-                          isDragging={draggingIdx === ordIdx} isExcluded={isExcluded}
+                          isDragging={draggingIdx === ordIdx} isExcluded={isExcluded} isParent={isParent}
                           issueLabels={issueLabels} setIssueLabel={setIssueLabel}
                           availableLabels={availableLabels}
                           setEst={setEst} setTitle={setTitle} members={members}
@@ -814,13 +843,14 @@ export default function StepConfigureIssues({
   }
   const [expandSignal, setExpandSignal] = useState(0) // positive=expand, negative=collapse, 0=default
   const expandAll = expandSignal === 0 ? null : expandSignal > 0
-  const activeIssues = issues.filter(i => !excludedIssues.has(i.id))
-  const excludedList = issues.filter(i => excludedIssues.has(i.id))
   const issueIds = new Set(issues.map(i => i.id))
+  const parentIds = new Set(issues.filter(i => i.parent?.id && issueIds.has(i.parent.id)).map(i => i.parent.id))
+  const activeIssues = issues.filter(i => !excludedIssues.has(i.id) && !parentIds.has(i.id))
+  const excludedList = issues.filter(i => excludedIssues.has(i.id))
   const relevantCrossProjectDeps = (crossProjectDeps || []).filter(d => issueIds.has(d.blocker.id) || issueIds.has(d.blocked.id))
   const memberIds = new Set(members.map(m => m.id))
 
-  // Error counts
+  // Error counts (parents are excluded — they are containers, not scheduled work)
   const missingEst = activeIssues.filter(i => !i.estimate || i.estimate <= 0)
   const missingLabelOrAssign = activeIssues.filter(i => {
     const hasLabel = (i.labels?.nodes || []).length > 0 || !!issueLabels[i.id]
@@ -905,12 +935,16 @@ export default function StepConfigureIssues({
     const newIssues = issues.filter(i => i.id.startsWith('__new__'))
     const backlogStateId = issues.find(i => i.state?.type === 'backlog')?.state?.id || null
     const idMap = {} // tempId → realId
+    const pendingParents = [] // new issues whose parent is also a new (temp) issue — needs second pass
     for (const issue of newIssues) {
       try {
         const input = { title: issue.title, teamId, projectId: issue.project?.id }
         if (backlogStateId) input.stateId = backlogStateId
         if (issue.estimate) input.estimate = issue.estimate
-        if (issue.parent?.id && !issue.parent.id.startsWith('__new__')) input.parentId = issue.parent.id
+        if (issue.parent?.id) {
+          if (issue.parent.id.startsWith('__new__')) pendingParents.push({ tempId: issue.id, parentTempId: issue.parent.id })
+          else input.parentId = issue.parent.id
+        }
         const assignVal = getAssign(issue.id)
         if (assignVal && assignVal !== '__auto__') input.assigneeId = assignVal
         const result = await linearQuery(apiKey, buildIssueCreateMutation(), { input })
@@ -926,7 +960,20 @@ export default function StepConfigureIssues({
         failed++
       }
     }
-    // Replace temp IDs in local state with real Linear IDs
+    // Second pass: link new sub-issues to new parents now that real IDs exist
+    for (const { tempId, parentTempId } of pendingParents) {
+      const realId = idMap[tempId]?.id
+      const realParentId = idMap[parentTempId]?.id
+      if (!realId || !realParentId) continue
+      try {
+        await linearQuery(apiKey, buildIssueUpdateMutation(), { id: realId, input: { parentId: realParentId } })
+      } catch (e) {
+        const orig = newIssues.find(i => i.id === tempId)
+        errors.push(`New "${orig?.title || tempId}" parent link: ${e.message}`)
+        failed++
+      }
+    }
+    // Replace temp IDs in local state with real Linear IDs (also remaps issueDeps keys/values)
     if (Object.keys(idMap).length) {
       onReplaceNewIssues(idMap)
     }
@@ -956,13 +1003,15 @@ export default function StepConfigureIssues({
       }
     }
 
-    // Create new dep relations
+    // Create new dep relations (remap any temp IDs to real Linear IDs from idMap)
     for (const { blockedId, blockerId } of depAdded) {
+      const realBlockedId = idMap[blockedId]?.id || blockedId
+      const realBlockerId = idMap[blockerId]?.id || blockerId
       const issue = issues.find(i => i.id === blockedId)
-      const label = issue?.identifier || blockedId
+      const label = issue?.identifier || idMap[blockedId]?.identifier || blockedId
       try {
         await linearQuery(apiKey, buildRelationCreateMutation(), {
-          issueId: blockerId, relatedIssueId: blockedId, type: 'blocks',
+          issueId: realBlockerId, relatedIssueId: realBlockedId, type: 'blocks',
         })
         ok++
       } catch (e) {
@@ -984,6 +1033,9 @@ export default function StepConfigureIssues({
       }
     }
 
+    // Keep the overlay up through the auto-refresh by flipping refreshing on
+    // before turning saving off — so there's no gap where the user could click.
+    if (failed === 0) setRefreshing(true)
     setSaving(false)
     setSaveResult({ ok, failed, errors })
     if (failed === 0) {
@@ -991,11 +1043,47 @@ export default function StepConfigureIssues({
       setUserChangedDeps(false)
       // Update linearDepsSet to match current issueDeps so "Linear: changed" indicators disappear
       if (onSaveComplete) onSaveComplete()
+      // Auto-refresh from Linear so local state matches what we just wrote
+      try {
+        await refreshFromLinear()
+      } catch (e) {
+        setSaveResult({ ok, failed, errors: [...errors, `Auto-refresh failed: ${e.message}`] })
+      }
+      setRefreshing(false)
     }
   }
 
   return (
     <div>
+      {/* Blocking overlay while save / refresh is in flight */}
+      {(saving || refreshing) && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(26,26,46,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999, backdropFilter: 'blur(2px)',
+        }}>
+          <style>{`@keyframes lp-spin { to { transform: rotate(360deg); } }`}</style>
+          <div style={{
+            background: 'white', borderRadius: 12, padding: '28px 36px',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            gap: 14, minWidth: 260,
+          }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%',
+              border: '3px solid #f0efe9', borderTopColor: '#e63946',
+              animation: 'lp-spin 0.8s linear infinite',
+            }} />
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>
+              {saving ? 'Saving to Linear…' : 'Refreshing from Linear…'}
+            </div>
+            <div style={{ fontSize: 11, color: '#9a9a9e', fontFamily: 'monospace' }}>
+              Please don't close this tab
+            </div>
+          </div>
+        </div>
+      )}
+
       <H1>Configure <R>Issues</R></H1>
       <Sub>Set estimates, labels, assignments, order, and dependencies for all issues. Drag to reorder within each project. Click a title to edit it (e.g. add [N] prefixes).</Sub>
 

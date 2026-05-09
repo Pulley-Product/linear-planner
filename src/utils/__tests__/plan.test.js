@@ -224,7 +224,7 @@ describe('computePlan', () => {
     expect(bEntry._ci).toBeGreaterThan(aEntry._ci)
   })
 
-  it('respects issue dependencies', () => {
+  it('respects issue dependencies (B no earlier than A)', () => {
     const m = mkMember()
     const issueA = mkIssue('Dep', { estimate: 5 })
     const issueB = mkIssue('Blocked', { estimate: 5 })
@@ -232,11 +232,31 @@ describe('computePlan', () => {
       issues: [issueA, issueB],
       members: [m],
       cycles: threeCycles(),
+      caps: { init1: { [m.id]: 10 } },
       issueDeps: { [issueB.id]: [issueA.id] },
     })
     const aEntry = result.sc.find(s => s.id === issueA.id)
     const bEntry = result.sc.find(s => s.id === issueB.id)
-    expect(bEntry._ci).toBeGreaterThan(aEntry._ci)
+    // Same-cycle is OK — A and B both fit in cycle 0 within the 10pt cap
+    expect(aEntry._ci).toBe(0)
+    expect(bEntry._ci).toBe(0)
+  })
+
+  it('issue dep spills to next cycle when blocker fills capacity', () => {
+    const m = mkMember()
+    const issueA = mkIssue('Big dep', { estimate: 10 }) // fills C0
+    const issueB = mkIssue('Blocked', { estimate: 5 })
+    const result = plan({
+      issues: [issueA, issueB],
+      members: [m],
+      cycles: threeCycles(),
+      caps: { init1: { [m.id]: 10 } },
+      issueDeps: { [issueB.id]: [issueA.id] },
+    })
+    const aEntry = result.sc.find(s => s.id === issueA.id)
+    const bEntry = result.sc.find(s => s.id === issueB.id)
+    expect(aEntry._ci).toBe(0)
+    expect(bEntry._ci).toBe(1)
   })
 
   it('distributes work across members', () => {
@@ -386,6 +406,60 @@ describe('computePlan', () => {
       labelMap: { frontend: [m1.id] },
     })
     expect(result.sc[0]._m.id).toBe(m1.id)
+  })
+
+  it('expands a dep on a parent to its sub-issues', () => {
+    const m = mkMember()
+    // Parent P has two sub-issues C1 and C2. Issue A depends on P.
+    // A must wait until both C1 and C2 finish.
+    const parent = mkIssue('Parent', { estimate: 1 })
+    const child1 = mkIssue('Child 1', { estimate: 5 })
+    const child2 = mkIssue('Child 2', { estimate: 5 })
+    child1.parent = { id: parent.id, identifier: parent.identifier }
+    child2.parent = { id: parent.id, identifier: parent.identifier }
+    const issueA = mkIssue('Blocked by parent', { estimate: 5 })
+
+    const result = plan({
+      // Parent is filtered out before plan; we pass children + A
+      issues: [child1, child2, issueA],
+      members: [m],
+      cycles: threeCycles(),
+      caps: { init1: { [m.id]: 10 } },
+      issueDeps: { [issueA.id]: [parent.id] },
+      childrenByParent: { [parent.id]: [child1.id, child2.id] },
+    })
+
+    const c1Entry = result.sc.find(s => s.id === child1.id)
+    const c2Entry = result.sc.find(s => s.id === child2.id)
+    const aEntry = result.sc.find(s => s.id === issueA.id)
+    expect(aEntry._ci).toBeGreaterThan(c1Entry._ci)
+    expect(aEntry._ci).toBeGreaterThan(c2Entry._ci)
+    expect(aEntry._ci).toBeGreaterThanOrEqual(Math.max(c1Entry._ci, c2Entry._ci) + 1)
+  })
+
+  it('expands deps through nested parents', () => {
+    const m = mkMember()
+    // Grandparent G → Parent P → Leaf L. Issue A depends on G.
+    const grand = mkIssue('Grand', { estimate: 1 })
+    const par = mkIssue('Parent', { estimate: 1 })
+    const leaf = mkIssue('Leaf', { estimate: 4 })
+    par.parent = { id: grand.id, identifier: grand.identifier }
+    leaf.parent = { id: par.id, identifier: par.identifier }
+    const issueA = mkIssue('Blocked', { estimate: 3 })
+
+    const result = plan({
+      issues: [leaf, issueA],
+      members: [m],
+      cycles: threeCycles(),
+      caps: { init1: { [m.id]: 10 } },
+      issueDeps: { [issueA.id]: [grand.id] },
+      childrenByParent: { [grand.id]: [par.id], [par.id]: [leaf.id] },
+    })
+
+    const leafEntry = result.sc.find(s => s.id === leaf.id)
+    const aEntry = result.sc.find(s => s.id === issueA.id)
+    // Dep is respected — A's start cycle is no earlier than the leaf's
+    expect(aEntry._ci).toBeGreaterThanOrEqual(leafEntry._ci)
   })
 
   it('committed work blocks capacity for pass 2 issues', () => {
